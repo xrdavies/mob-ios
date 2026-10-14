@@ -59,12 +59,15 @@ private struct DesktopCanvas: View {
 
     var body: some View {
         let live = app.vnc.state.status == .connected
+        let activities = app.chat.detail?.activities ?? []
         ZStack {
             Color.black
             if live, let image = app.vnc.image {
                 Image(decorative: image, scale: 1).resizable().interpolation(.medium).aspectRatio(contentMode: .fit)
+                    .overlay { ClickPing(click: latestClick(activities), geometry: screenGeometry(activities)) }
             } else if let snapshot {
                 Image(uiImage: snapshot).resizable().aspectRatio(contentMode: .fit)
+                    .overlay { ClickPing(click: latestClick(activities), geometry: screenGeometry(activities)) }
             } else {
                 Text(placeholder).font(.caption).foregroundStyle(.white.opacity(0.7)).multilineTextAlignment(.center).padding()
             }
@@ -88,6 +91,35 @@ private struct DesktopCanvas: View {
         if s.status == .connecting { return "Connecting…" }
         let parts = [s.detail.isEmpty ? nil : s.detail, snapshotError.map { "Snapshot: \($0)" }].compactMap { $0 }
         return parts.isEmpty ? "Office desktop is not connected" : parts.joined(separator: "\n")
+    }
+}
+
+/// The agent's last click pings once on the picture, like the desktop app.
+private struct ClickPing: View {
+    let click: AgentClick?
+    let geometry: ScreenGeometry?
+    @State private var progress: CGFloat = 1
+
+    var body: some View {
+        GeometryReader { geo in
+            if let click, let geometry, progress < 1 {
+                let p = CGPoint(x: click.x / geometry.pointWidth * geo.size.width, y: click.y / geometry.pointHeight * geo.size.height)
+                ZStack {
+                    Circle().stroke(Color.blue.opacity(1 - progress), lineWidth: 2.5).frame(width: 16 + 44 * progress, height: 16 + 44 * progress)
+                    Circle().fill(Color.blue.opacity(0.5 * (1 - progress))).frame(width: 12, height: 12)
+                }
+                .position(p)
+            }
+        }
+        .allowsHitTesting(false)
+        .onAppear { ping() }
+        .onChange(of: click?.id) { ping() }
+    }
+
+    private func ping() {
+        guard click != nil else { return }
+        progress = 0
+        withAnimation(.easeOut(duration: 1.6)) { progress = 1 }
     }
 }
 

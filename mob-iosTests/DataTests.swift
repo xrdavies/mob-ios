@@ -51,6 +51,22 @@ final class DataTests: XCTestCase {
         XCTAssertTrue(waiting)
     }
 
+    func testClickMarker() {
+        func act(_ id: String, _ tool: String, status: String = "completed", args: [String: JSONValue]? = nil, text: String? = nil) -> Activity {
+            Activity(id: id, taskId: "t", kind: "tool", status: status, title: id, server: nil, tool: tool, arguments: args, command: nil,
+                     exitCode: nil, text: text, truncated: nil, error: nil, images: nil, items: nil, changes: nil, startedAt: nil, updatedAt: nil)
+        }
+        let acts = [
+            act("s1", "screenshot", text: #"{"point_width":1512,"point_height":982}"#),
+            act("c1", "click", args: ["x": .number(10), "y": .number(20)]),
+            act("c2", "click", args: ["x": .number(400), "y": .string("300")]),
+            act("c3", "click", status: "failed", args: ["x": .number(1), "y": .number(1)]),
+        ]
+        XCTAssertEqual(latestClick(acts), AgentClick(id: "c2", x: 400, y: 300))
+        XCTAssertEqual(screenGeometry(acts), ScreenGeometry(pointWidth: 1512, pointHeight: 982))
+        XCTAssertNil(screenGeometry([act("s", "screenshot", text: "not json")]))
+    }
+
     func testMarkdownBlocks() {
         XCTAssertEqual(parseMarkdown("# Title\n\nSome **bold**\ntext.\n\n- one\n  wrapped\n2. two\n\n```swift\nlet x = 1\n```\n> quoted\n---"), [
             .heading(level: 1, text: "Title"),

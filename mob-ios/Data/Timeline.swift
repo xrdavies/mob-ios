@@ -113,3 +113,43 @@ func buildTimeline(tasks: [AgentTask], messages: [Message], activities: [Activit
     }
     return items
 }
+
+/// Desktop size in points, from the most recent screenshot step's metadata.
+struct ScreenGeometry: Equatable {
+    let pointWidth: Double
+    let pointHeight: Double
+}
+
+func screenGeometry(_ activities: [Activity]) -> ScreenGeometry? {
+    for a in activities.reversed() where a.tool == "screenshot" {
+        guard let data = a.text?.data(using: .utf8),
+              let meta = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let w = (meta["point_width"] as? NSNumber)?.doubleValue, let h = (meta["point_height"] as? NSNumber)?.doubleValue,
+              w > 0, h > 0 else { continue }
+        return ScreenGeometry(pointWidth: w, pointHeight: h)
+    }
+    return nil
+}
+
+/// The agent's last completed click, in desktop points.
+struct AgentClick: Equatable {
+    let id: String
+    let x: Double
+    let y: Double
+}
+
+func latestClick(_ activities: [Activity]) -> AgentClick? {
+    func number(_ v: JSONValue?) -> Double? {
+        switch v {
+        case .number(let n): return n
+        case .string(let s): return Double(s)
+        default: return nil
+        }
+    }
+    for a in activities.reversed() where a.tool == "click" && a.status == "completed" {
+        if let x = number(a.arguments?["x"]), let y = number(a.arguments?["y"]), x.isFinite, y.isFinite {
+            return AgentClick(id: a.id, x: x, y: y)
+        }
+    }
+    return nil
+}
