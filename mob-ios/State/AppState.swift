@@ -21,6 +21,8 @@ final class AppState: MachineEvents {
     var showLiveView = false
     /// Bumped to bring the Chat tab to the front (notification taps).
     private(set) var showChat = 0
+    /// Turns waiting for the desktop, per machine (all chats on it).
+    private(set) var queued: [String: Int] = [:]
 
     /// Composer choices, remembered per machine ("<machine>.runner") and per machine and runner
     /// ("<machine>/<runner>.model" / ".effort"), like the desktop app.
@@ -215,6 +217,8 @@ final class AppState: MachineEvents {
     func onReset(_ m: Machine) {
         if m.id == activeMachineId { chat.refreshAll() }
     }
+
+    func onQueue(_ m: Machine, _ queued: Int) { self.queued[m.id] = queued }
 
     func onLive(_ m: Machine, _ live: Bool) {
         if live { liveMachines.insert(m.id) } else { liveMachines.remove(m.id) }

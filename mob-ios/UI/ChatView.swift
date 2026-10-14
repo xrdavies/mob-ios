@@ -65,6 +65,9 @@ struct ChatView: View {
             HStack(spacing: 5) {
                 Circle().fill(app.isConnected ? Color.success : .red).frame(width: 7, height: 7)
                 Text(app.activeMachine?.name ?? "No office Mac").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                if let waiting = app.queued[app.activeMachineId ?? ""], waiting > 0 {
+                    Text("· queue \(waiting)").font(.caption).foregroundStyle(.secondary)
+                }
                 let problems = app.health?.problems ?? []
                 if app.isConnected && !problems.isEmpty {
                     Button("· \(problems.count) setup issue\(problems.count > 1 ? "s" : "")", action: openSettings)
@@ -220,7 +223,8 @@ struct SessionList: View {
         Menu {
             ForEach(app.machines) { m in
                 Button { app.selectMachine(m.id) } label: {
-                    if m.id == app.activeMachineId { Label(m.name, systemImage: "checkmark") } else { Text(m.name) }
+                    let title = m.name + ((app.queued[m.id] ?? 0) > 0 ? " · queue \(app.queued[m.id]!)" : "")
+                    if m.id == app.activeMachineId { Label(title, systemImage: "checkmark") } else { Text(title) }
                 }
             }
             Divider()

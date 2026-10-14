@@ -111,6 +111,8 @@ final class APIClient {
 
     func deleteSession(_ id: String) async throws { _ = try await send("DELETE", "sessions/\(id)") }
 
+    func queue() async throws -> QueueState { try await get("queue") }
+
     func tasks(limit: Int = 100) async throws -> [AgentTask] {
         (try await get("tasks", query: ["limit": String(limit)]) as TasksResponse).tasks ?? []
     }

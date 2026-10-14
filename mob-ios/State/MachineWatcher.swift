@@ -8,6 +8,8 @@ protocol MachineEvents: AnyObject {
     func onDeleted(_ m: Machine, _ id: String)
     func onReset(_ m: Machine)
     func onLive(_ m: Machine, _ live: Bool)
+    /// Turns waiting for the desktop on this machine (all chats).
+    func onQueue(_ m: Machine, _ queued: Int)
 }
 
 /// Follows one machine's GET /events (session summaries) and remembers the last summary of
@@ -17,9 +19,11 @@ final class MachineWatcher {
     let machine: Machine
     private var known: [String: Session] = [:]
     private var task: Task<Void, Never>?
+    private weak var events: MachineEvents?
 
     init(_ machine: Machine, events: MachineEvents) {
         self.machine = machine
+        self.events = events
         task = Task { [weak self, weak events] in
             let client = APIClient(baseURL: machine.mobdUrl)
             var lastId: String?
@@ -44,6 +48,10 @@ final class MachineWatcher {
                             if let s = Self.decode(e.data) {
                                 self.known[s.id] = nil
                                 events.onDeleted(machine, s.id)
+                            }
+                        case "queue":
+                            if let data = e.data.data(using: .utf8), let q = try? APIClient.decoder.decode(QueueState.self, from: data) {
+                                events.onQueue(machine, q.queued?.count ?? 0)
                             }
                         case "reset":
                             try await self.seed(client)
@@ -71,5 +79,6 @@ final class MachineWatcher {
     private func seed(_ client: APIClient) async throws {
         let list = try await client.sessions(archived: "all")
         known = Dictionary(list.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        if let q = try? await client.queue() { events?.onQueue(machine, q.queued?.count ?? 0) }
     }
 }

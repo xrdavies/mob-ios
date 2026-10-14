@@ -219,6 +219,12 @@ struct Activity: Codable, Identifiable, Hashable {
     let updatedAt: String?
 }
 
+/// GET /queue and the global "queue" event.
+struct QueueState: Codable {
+    let running: [AgentTask]?
+    let queued: [AgentTask]?
+}
+
 struct SessionsResponse: Codable { let sessions: [Session]? }
 struct TasksResponse: Codable { let tasks: [AgentTask]? }
 
