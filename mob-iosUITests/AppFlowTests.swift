@@ -43,7 +43,9 @@ final class AppFlowTests: XCTestCase {
     }
 
     func testChatListAndSettings() {
-        app.buttons["Chats"].tap()
+        // iPhone opens the chat list as a sheet; on iPad it is always beside the chat.
+        let chats = app.buttons["Chats"]
+        if chats.waitForExistence(timeout: 5) { chats.tap() }
         XCTAssertTrue(app.staticTexts["Recent"].waitForExistence(timeout: 10))
         shot("chats")
         let search = app.searchFields["Search chats"]
@@ -55,9 +57,11 @@ final class AppFlowTests: XCTestCase {
         shot("search")
         // iOS 26 closes search with a round button next to the field.
         let close = app.buttons["Close"].firstMatch
-        if close.exists { close.tap() } else { app.buttons["Cancel"].firstMatch.tap() }
-        app.buttons["Done"].tap()
-        app.tabBars.buttons["Settings"].tap()
+        if close.exists { close.tap() }
+        else if app.buttons["Cancel"].exists { app.buttons["Cancel"].firstMatch.tap() }
+        else { search.buttons["Clear text"].tap() }
+        if app.buttons["Done"].exists { app.buttons["Done"].tap() }
+        app.buttons["Settings"].firstMatch.tap()
         XCTAssertTrue(app.staticTexts["Machines"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Connected to'")).firstMatch.waitForExistence(timeout: 20))
         shot("settings")
@@ -75,6 +79,13 @@ final class AppFlowTests: XCTestCase {
         XCTAssertTrue(thumb.waitForExistence(timeout: 15))
         sleep(4) // a snapshot or live frame arrives
         shot("thumbnail")
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            // Landscape iPad has room for the desktop beside the chat.
+            XCUIDevice.shared.orientation = .landscapeLeft
+            sleep(3)
+            shot("thumbnail-landscape")
+            XCUIDevice.shared.orientation = .portrait
+        }
         thumb.tap()
         XCTAssertTrue(app.buttons["Close"].waitForExistence(timeout: 10))
         sleep(3)

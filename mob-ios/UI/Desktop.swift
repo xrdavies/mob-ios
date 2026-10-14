@@ -26,13 +26,14 @@ private struct RetainDesktop: ViewModifier {
 /// Always view-only: tapping it opens the full-screen live view.
 struct DesktopThumbnail: View {
     @Environment(AppState.self) private var app
+    var maxHeight: CGFloat = 240
 
     var body: some View {
         let s = app.vnc.state
         let aspect = s.width > 0 && s.height > 0 ? CGFloat(s.width) / CGFloat(s.height) : 16 / 10
         DesktopCanvas(snapshotWidth: 960)
             .aspectRatio(aspect, contentMode: .fit)
-            .frame(maxHeight: 240)
+            .frame(maxHeight: maxHeight)
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .overlay(alignment: .topLeading) { StatusChip().padding(8) }
             .overlay(alignment: .topTrailing) {

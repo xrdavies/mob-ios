@@ -4,6 +4,7 @@ struct ChatView: View {
     @Environment(AppState.self) private var app
     let openSettings: () -> Void
     @State private var showChats = false
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     private var chat: ChatStore { app.chat }
 
@@ -13,33 +14,53 @@ struct ChatView: View {
     }
 
     var body: some View {
+        // iPad: the chat list stays beside the chat instead of opening as a sheet.
+        if sizeClass == .regular {
+            NavigationSplitView {
+                SessionList(openSettings: openSettings, sidebar: true)
+            } detail: {
+                chatStack
+            }
+        } else {
+            chatStack
+        }
+    }
+
+    private var chatStack: some View {
         @Bindable var app = app
         let items = items
         let lastFooter = items.last { if case .footer = $0 { return true } else { return false } }?.id
-        NavigationStack {
-            VStack(spacing: 0) {
-                if app.showDesktopDrawer, app.activeMachine != nil {
-                    DesktopThumbnail()
-                        .transition(.move(edge: .top).combined(with: .opacity))
+        return NavigationStack {
+            GeometryReader { geo in
+                // Wide screens show the desktop in a column beside the chat, like the desktop app.
+                let side = geo.size.width >= 720
+                HStack(spacing: 0) {
+                    chatColumn(items, lastFooter: lastFooter, thumbnailOnTop: !side)
+                    if side, app.showDesktopDrawer, app.activeMachine != nil {
+                        Divider()
+                        DesktopThumbnail(maxHeight: .infinity)
+                            .fixedSize(horizontal: false, vertical: true) // height from the aspect ratio, pinned to the top
+                            .frame(width: min(geo.size.width * 0.4, 520))
+                            .frame(maxHeight: .infinity, alignment: .top)
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                    }
                 }
-                content(items, lastFooter: lastFooter)
-            }
-            .safeAreaInset(edge: .bottom) {
-                if app.activeMachine != nil { Composer() }
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { showChats = true } label: {
-                        Image(systemName: "sidebar.left")
-                            .overlay(alignment: .topTrailing) {
-                                if app.waitingCount > 0 {
-                                    Text("\(app.waitingCount)").font(.caption2.bold()).foregroundStyle(.white)
-                                        .padding(.horizontal, 4).background(Color.red, in: Capsule()).offset(x: 9, y: -8)
+                if sizeClass != .regular {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button { showChats = true } label: {
+                            Image(systemName: "sidebar.left")
+                                .overlay(alignment: .topTrailing) {
+                                    if app.waitingCount > 0 {
+                                        Text("\(app.waitingCount)").font(.caption2.bold()).foregroundStyle(.white)
+                                            .padding(.horizontal, 4).background(Color.red, in: Capsule()).offset(x: 9, y: -8)
+                                    }
                                 }
-                            }
+                        }
+                        .accessibilityLabel(app.waitingCount > 0 ? "Chats, \(app.waitingCount) waiting for you" : "Chats")
                     }
-                    .accessibilityLabel(app.waitingCount > 0 ? "Chats, \(app.waitingCount) waiting for you" : "Chats")
                 }
                 ToolbarItem(placement: .principal) { title }
                 ToolbarItemGroup(placement: .topBarTrailing) {
@@ -63,6 +84,22 @@ struct ChatView: View {
             } message: {
                 Text(chat.error ?? "")
             }
+        }
+    }
+
+    /// Timeline and composer, kept to a readable width on wide screens.
+    private func chatColumn(_ items: [TimelineItem], lastFooter: String?, thumbnailOnTop: Bool) -> some View {
+        VStack(spacing: 0) {
+            if thumbnailOnTop, app.showDesktopDrawer, app.activeMachine != nil {
+                DesktopThumbnail()
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+            content(items, lastFooter: lastFooter)
+        }
+        .frame(maxWidth: 840)
+        .frame(maxWidth: .infinity)
+        .safeAreaInset(edge: .bottom) {
+            if app.activeMachine != nil { Composer().frame(maxWidth: 840) }
         }
     }
 
@@ -135,10 +172,12 @@ struct ChatView: View {
 }
 
 /// Chat list for the active machine, with the machine switcher on top.
+/// A sheet on iPhone; on iPad it is the `sidebar` of a split view and stays beside the chat.
 struct SessionList: View {
     @Environment(AppState.self) private var app
     @Environment(\.dismiss) private var dismiss
     let openSettings: () -> Void
+    var sidebar = false
     @State private var showArchived = false
     @State private var renaming: Session?
     @State private var newTitle = ""
@@ -165,67 +204,71 @@ struct SessionList: View {
     }
 
     var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    Button {
-                        chat.open(nil)
-                        dismiss()
-                    } label: { Label("New chat", systemImage: "square.and.pencil") }
-                    .disabled(app.activeMachine == nil)
-                }
-                if searching {
-                    searchResults
-                } else {
-                let pinned = chat.sessions.filter { $0.pinned == true }
-                if !pinned.isEmpty {
-                    Section("Pinned") { ForEach(pinned) { row($0) } }
-                }
-                Section("Recent") {
-                    let recent = chat.sessions.filter { $0.pinned != true }
-                    if recent.isEmpty { Text("No chats yet").foregroundStyle(.secondary) }
-                    ForEach(recent) { row($0) }
-                }
-                Section {
-                    DisclosureGroup("Archived", isExpanded: $showArchived) {
-                        let archived = chat.archived ?? []
-                        if archived.isEmpty { Text("Nothing archived").foregroundStyle(.secondary) }
-                        ForEach(archived) { row($0) }
-                    }
-                    .onChange(of: showArchived) { if showArchived { chat.loadArchived() } }
-                }
-                }
+        if sidebar { list } else { NavigationStack { list } }
+    }
+
+    private var list: some View {
+        List {
+            Section {
+                Button {
+                    chat.open(nil)
+                    close()
+                } label: { Label("New chat", systemImage: "square.and.pencil") }
+                .disabled(app.activeMachine == nil)
             }
-            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search chats")
-            // Search covers archived chats too, so load them once a search starts.
-            .onChange(of: searching) { if searching { chat.loadArchived() } }
-            .refreshable { chat.refreshSessions() }
-            .navigationTitle("Chats")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) { machineMenu }
-                ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
+            if searching {
+                searchResults
+            } else {
+            let pinned = chat.sessions.filter { $0.pinned == true }
+            if !pinned.isEmpty {
+                Section("Pinned") { ForEach(pinned) { row($0) } }
             }
-            .alert("Rename chat", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
-                TextField("Title", text: $newTitle)
-                Button("Rename") {
-                    if let s = renaming, !newTitle.trimmingCharacters(in: .whitespaces).isEmpty {
-                        chat.rename(s, newTitle.trimmingCharacters(in: .whitespaces))
-                    }
+            Section("Recent") {
+                let recent = chat.sessions.filter { $0.pinned != true }
+                if recent.isEmpty { Text("No chats yet").foregroundStyle(.secondary) }
+                ForEach(recent) { row($0) }
+            }
+            Section {
+                DisclosureGroup("Archived", isExpanded: $showArchived) {
+                    let archived = chat.archived ?? []
+                    if archived.isEmpty { Text("Nothing archived").foregroundStyle(.secondary) }
+                    ForEach(archived) { row($0) }
                 }
-                Button("Cancel", role: .cancel) {}
+                .onChange(of: showArchived) { if showArchived { chat.loadArchived() } }
             }
-            .confirmationDialog(
-                "Delete “\(deleting?.displayTitle ?? "")”?",
-                isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
-                titleVisibility: .visible
-            ) {
-                Button("Delete", role: .destructive) { if let s = deleting { chat.delete(s) } }
-            } message: {
-                Text("The chat and its screenshots are removed from the office Mac. This cannot be undone.")
             }
         }
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search chats")
+        // Search covers archived chats too, so load them once a search starts.
+        .onChange(of: searching) { if searching { chat.loadArchived() } }
+        .refreshable { chat.refreshSessions() }
+        .navigationTitle("Chats")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) { machineMenu }
+            if !sidebar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+        }
+        .alert("Rename chat", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+            TextField("Title", text: $newTitle)
+            Button("Rename") {
+                if let s = renaming, !newTitle.trimmingCharacters(in: .whitespaces).isEmpty {
+                    chat.rename(s, newTitle.trimmingCharacters(in: .whitespaces))
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .confirmationDialog(
+            "Delete “\(deleting?.displayTitle ?? "")”?",
+            isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) { if let s = deleting { chat.delete(s) } }
+        } message: {
+            Text("The chat and its screenshots are removed from the office Mac. This cannot be undone.")
+        }
     }
+
+    private func close() { if !sidebar { dismiss() } }
 
     private var machineMenu: some View {
         Menu {
@@ -237,7 +280,7 @@ struct SessionList: View {
             }
             Divider()
             Button {
-                dismiss()
+                close()
                 openSettings()
             } label: { Label("Manage machines…", systemImage: "gearshape") }
         } label: {
@@ -252,7 +295,7 @@ struct SessionList: View {
     private func row(_ s: Session) -> some View {
         Button {
             chat.open(s.id)
-            dismiss()
+            close()
         } label: {
             HStack(spacing: 12) {
                 statusIcon(s).frame(width: 22)
