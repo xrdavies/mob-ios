@@ -4,33 +4,46 @@ Native iOS app (Swift, SwiftUI) for [mob](https://github.com/xrdavies/mob): disp
 
 ## Requirements
 
-- iOS 16.0+
-- Xcode 15.0+
+- iOS 17.0+
+- Xcode 26 (the project uses Xcode 16+ synchronized folders: new files in `mob-ios/` need no project edits)
 - Office Mac running [mobd](https://github.com/xrdavies/mob/tree/main/cmd/mobd) (API v3) with Screen Sharing enabled
 
 ## Features
 
-- **Chat with your office agent** (Codex or Claude Code)
-- **Task timeline** with live status updates
-- **Question cards** when the agent needs your input
-- **Live desktop view** (optional drawer; VNC over WebSocket)
-- **Local notifications** for questions and completed tasks
+Same as [mob-android](https://github.com/xrdavies/mob-android):
+
+- **Several office Macs**: add, edit and switch machines (Settings, or the switcher in the chat list); each has its own chats and desktop sign-in
+- **Chats**: chat list with New chat, Pinned / Recent / Archived; swipe or long-press to rename, pin, archive or delete
+- **Composer**: up to 10 photos (uploaded as JPEG), agent for a new chat, model and reasoning effort (remembered per machine and agent), **Stop**, adding a message to a running Codex turn (steer), queue position while waiting for the desktop
+- **Timeline** like the desktop app: Markdown replies (copyable), agent steps folded into groups and expandable (commands, output, tools, reasoning, plans, file changes, screenshots), per-turn duration, tokens and cost, failures with Retry
+- **Question and approval cards** in the chat
+- **Live updates** over mobd's `/events` and `/tasks/{id}/events` streams
+- **Notifications** for questions and finished or failed tasks on every machine; tap opens the chat. iOS allows no live connection in the background, so there the app checks when iOS grants a background refresh (typically every 15 minutes or more)
+- **Setup warnings** from mobd's readiness checks
+- **Live desktop**: a thumbnail under the title (hidden by default, toggled from the top bar; view-only) and a full-screen view with **View / Control**. Control: tap = click, long-press = right-click, drag = drag, two fingers = scroll, pinch = zoom, plus the phone keyboard and a keys bar (⌘ ⌥ ⌃ ⇧ for shortcuts, Esc, Tab, arrows, Paste). Without a desktop sign-in it shows `/screen` snapshots
 - **No login required**: paste your office Mac's mobd URL and connect
 
 ## Setup
 
 1. Clone: `git clone git@github.com:xrdavies/mob-ios.git`
-2. Open `mob-ios.xcodeproj` in Xcode
-3. Build and run on simulator or device
-4. In Settings, enter your office Mac's mobd URL (e.g. `http://192.168.1.100:8080` or via Tailscale)
+2. Open `mob-ios.xcodeproj` in Xcode, pick a simulator or device, Run
+3. Settings → Machines → Add machine: your office Mac's mobd URL (e.g. `http://192.168.1.100:8080` or via Tailscale; `http://` is added if omitted)
+
+From the command line:
+
+```bash
+xcodebuild -project mob-ios.xcodeproj -scheme mob-ios -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
+```
+
+The UI tests (`mob-iosUITests`) drive the app against a real mobd and expect a machine saved in the simulator; they create and send in a new chat.
 
 ## Architecture
 
-- **SwiftUI** for all UI
-- **Combine** for reactive state
-- **URLSession** for HTTP + Server-Sent Events
-- **Starscream** (or native URLSessionWebSocketTask) for `/vnc` WebSocket
-- **MVVM**: `APIClient` → `ChatViewModel` / `TaskViewModel` → Views
+- **SwiftUI** on iOS 17 Observation (`@Observable`)
+- `Data/`: API models, `APIClient` (URLSession), SSE reader, timeline builder, Markdown blocks
+- `State/`: `AppState` (machines, health, notifications, one `MachineWatcher` per machine on `/events`) owns `ChatStore` (chat list and the open conversation) and `VncSession`
+- `VNC/`: native RFB 3.8 client over `URLSessionWebSocketTask` to mobd's `/vnc` relay, Apple Remote Desktop sign-in (Montgomery `modPow`, CommonCrypto AES, CryptoKit MD5), ZRLE via the Compression framework; ported from mob-android and [svnc](https://github.com/xrdavies/svnc)
+- `UI/`: views; touch handling for the desktop uses UIKit gesture recognizers
 
 ## License
 

@@ -14,6 +14,10 @@
             <BuildableReference BuildableIdentifier = "primary" BlueprintIdentifier = "A10000000000000000000022" BuildableName = "mob-iosTests.xctest" BlueprintName = "mob-iosTests" ReferencedContainer = "container:mob-ios.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference skipped = "NO">
+            <BuildableReference BuildableIdentifier = "primary" BlueprintIdentifier = "A10000000000000000000042" BuildableName = "mob-iosUITests.xctest" BlueprintName = "mob-iosUITests" ReferencedContainer = "container:mob-ios.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction buildConfiguration = "Debug" selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB" launchStyle = "0" useCustomWorkingDirectory = "NO" ignoresPersistentStateOnLaunch = "NO" debugDocumentVersioning = "YES" debugServiceExtension = "internal" allowLocationSimulation = "YES">
