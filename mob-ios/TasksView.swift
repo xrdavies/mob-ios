@@ -8,21 +8,27 @@ struct TasksView: View {
         NavigationView {
             Group {
                 if viewModel.tasks.isEmpty {
-                    ContentUnavailableView(
-                        "No tasks yet",
-                        systemImage: "list.bullet",
-                        description: Text("Tasks you create will appear here")
-                    )
+                    VStack(spacing: 12) {
+                        Image(systemName: "list.bullet")
+                            .font(.system(size: 60))
+                            .foregroundStyle(.secondary)
+                        Text("No tasks yet")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                        Text("Tasks you create will appear here")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
                 } else {
                     List(viewModel.tasks) { task in
                         TaskRow(task: task)
                     }
+                    .refreshable {
+                        await viewModel.refresh()
+                    }
                 }
             }
             .navigationTitle("Tasks")
-            .refreshable {
-                await viewModel.refresh()
-            }
         }
         .onAppear {
             viewModel.apiClient = appState.apiClient
@@ -32,7 +38,7 @@ struct TasksView: View {
 }
 
 struct TaskRow: View {
-    let task: Task
+    let task: AgentTask
     
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -104,7 +110,7 @@ struct StatusBadge: View {
 }
 
 class TasksViewModel: ObservableObject {
-    @Published var tasks: [Task] = []
+    @Published var tasks: [AgentTask] = []
     var apiClient: APIClient?
     
     func loadTasks() {
@@ -119,7 +125,7 @@ class TasksViewModel: ObservableObject {
         
         do {
             let sessions = try await api.listSessions()
-            var allTasks: [Task] = []
+            var allTasks: [AgentTask] = []
             
             for session in sessions {
                 let detail = try await api.getSession(session.id)

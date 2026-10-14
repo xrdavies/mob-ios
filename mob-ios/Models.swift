@@ -26,7 +26,7 @@ struct Runner: Codable, Identifiable {
     var id: String { name }
 }
 
-struct Task: Codable, Identifiable {
+struct AgentTask: Codable, Identifiable {
     let id: String
     let sessionId: String
     let runner: String
@@ -41,7 +41,7 @@ struct Task: Codable, Identifiable {
 
 enum TaskStatus: String, Codable {
     case queued, running, succeeded, failed, cancelled
-    
+
     var isTerminal: Bool {
         self == .succeeded || self == .failed || self == .cancelled
     }

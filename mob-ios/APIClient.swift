@@ -23,7 +23,7 @@ class APIClient {
     
     // MARK: - Tasks
     
-    func createTask(prompt: String, sessionId: String? = nil, runner: String? = nil, model: String? = nil, effort: String? = nil) async throws -> Task {
+    func createTask(prompt: String, sessionId: String? = nil, runner: String? = nil, model: String? = nil, effort: String? = nil) async throws -> AgentTask {
         let url = URL(string: "\(baseURL)/tasks")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -38,13 +38,13 @@ class APIClient {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         
         let (data, _) = try await session.data(for: request)
-        return try JSONDecoder().decode(Task.self, from: data)
+        return try JSONDecoder().decode(AgentTask.self, from: data)
     }
     
-    func getTask(_ id: String) async throws -> Task {
+    func getTask(_ id: String) async throws -> AgentTask {
         let url = URL(string: "\(baseURL)/tasks/\(id)")!
         let (data, _) = try await session.data(from: url)
-        return try JSONDecoder().decode(Task.self, from: data)
+        return try JSONDecoder().decode(AgentTask.self, from: data)
     }
     
     func cancelTask(_ id: String) async throws {
@@ -125,7 +125,7 @@ struct SessionsResponse: Codable {
 
 struct SessionDetail: Codable {
     let session: Session
-    let tasks: [Task]
+    let tasks: [AgentTask]
     let activities: [Activity]
     let questions: [Question]
 }

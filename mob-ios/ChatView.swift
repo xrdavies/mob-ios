@@ -29,11 +29,18 @@ struct ChatView: View {
                         }
                     }
                 } else {
-                    ContentUnavailableView(
-                        "No conversation yet",
-                        systemImage: "bubble.left.and.bubble.right",
-                        description: Text("Ask the agent to do something")
-                    )
+                    VStack(spacing: 12) {
+                        Image(systemName: "bubble.left.and.bubble.right")
+                            .font(.system(size: 60))
+                            .foregroundStyle(.secondary)
+                        Text("No conversation yet")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                        Text("Ask the agent to do something")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 
                 // Composer

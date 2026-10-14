@@ -29,3 +29,4 @@ Carthage/Build/
 
 # macOS
 .DS_Store
+build/
