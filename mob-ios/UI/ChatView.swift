@@ -30,8 +30,16 @@ struct ChatView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button { showChats = true } label: { Image(systemName: "sidebar.left") }
-                        .accessibilityLabel("Chats")
+                    Button { showChats = true } label: {
+                        Image(systemName: "sidebar.left")
+                            .overlay(alignment: .topTrailing) {
+                                if app.waitingCount > 0 {
+                                    Text("\(app.waitingCount)").font(.caption2.bold()).foregroundStyle(.white)
+                                        .padding(.horizontal, 4).background(Color.red, in: Capsule()).offset(x: 9, y: -8)
+                                }
+                            }
+                    }
+                    .accessibilityLabel(app.waitingCount > 0 ? "Chats, \(app.waitingCount) waiting for you" : "Chats")
                 }
                 ToolbarItem(placement: .principal) { title }
                 ToolbarItemGroup(placement: .topBarTrailing) {

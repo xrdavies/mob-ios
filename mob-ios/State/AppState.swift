@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import UIKit
+import UserNotifications
 
 /// App-wide state: office Macs, the active machine's health, chats, live view and notifications.
 @MainActor @Observable
@@ -21,6 +22,16 @@ final class AppState: MachineEvents {
     var showLiveView = false
     /// Bumped to bring the Chat tab to the front (notification taps).
     private(set) var showChat = 0
+    /// Chats waiting for an answer, per machine.
+    private var waiting: [String: Set<String>] = [:] {
+        didSet {
+            waitingCount = waiting.values.reduce(0) { $0 + $1.count }
+            UNUserNotificationCenter.current().setBadgeCount(waitingCount)
+        }
+    }
+    /// All chats waiting for an answer: tab, chat-list and app icon badges.
+    private(set) var waitingCount = 0
+
     /// Turns waiting for the desktop, per machine (all chats on it).
     private(set) var queued: [String: Int] = [:]
 
@@ -102,6 +113,7 @@ final class AppState: MachineEvents {
     func delete(_ m: Machine) {
         machines.removeAll { $0.id == m.id }
         saveMachines()
+        waiting[m.id] = nil
         defaults.removeObject(forKey: "session.\(m.id)")
         if m.id == activeMachineId {
             activeMachineId = machines.first?.id
@@ -188,7 +200,12 @@ final class AppState: MachineEvents {
         foreground && m.id == activeMachineId && chat.currentId == s.id
     }
 
+    func onSeed(_ m: Machine, _ sessions: [Session]) {
+        waiting[m.id] = Set(sessions.filter { $0.waiting == true }.map(\.id))
+    }
+
     func onSession(_ m: Machine, _ s: Session, before: Session?) {
+        if s.waiting == true { waiting[m.id, default: []].insert(s.id) } else { waiting[m.id]?.remove(s.id) }
         if m.id == activeMachineId { chat.apply(s) }
         notifyChanges(m, s, before: before)
     }
@@ -213,6 +230,7 @@ final class AppState: MachineEvents {
     }
 
     func onDeleted(_ m: Machine, _ id: String) {
+        waiting[m.id]?.remove(id)
         if m.id == activeMachineId { chat.remove(id) }
     }
 

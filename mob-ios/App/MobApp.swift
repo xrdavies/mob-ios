@@ -55,6 +55,7 @@ struct RootView: View {
         TabView(selection: $tab) {
             ChatView(openSettings: { tab = 2 })
                 .tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right") }
+                .badge(app.waitingCount)
                 .tag(0)
             TasksView(openChat: { id in
                 app.chat.open(id)

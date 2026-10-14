@@ -8,6 +8,8 @@ protocol MachineEvents: AnyObject {
     func onDeleted(_ m: Machine, _ id: String)
     func onReset(_ m: Machine)
     func onLive(_ m: Machine, _ live: Bool)
+    /// Every chat on the machine, after (re)connecting.
+    func onSeed(_ m: Machine, _ sessions: [Session])
     /// Turns waiting for the desktop on this machine (all chats).
     func onQueue(_ m: Machine, _ queued: Int)
 }
@@ -82,6 +84,7 @@ final class MachineWatcher {
     private func seed(_ client: APIClient) async throws {
         let list = try await client.sessions(archived: "all")
         known = Dictionary(list.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        events?.onSeed(machine, list)
         if let q = try? await client.queue() { events?.onQueue(machine, q.queued?.count ?? 0) }
     }
 }
