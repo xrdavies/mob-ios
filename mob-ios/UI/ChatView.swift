@@ -132,8 +132,26 @@ struct SessionList: View {
     @State private var renaming: Session?
     @State private var newTitle = ""
     @State private var deleting: Session?
+    @State private var query = ""
 
     private var chat: ChatStore { app.chat }
+    private var searching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
+
+    /// Chats (including archived) whose title matches, and other machines to switch to.
+    @ViewBuilder private var searchResults: some View {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        var seen = Set<String>()
+        let found = (chat.sessions + (chat.archived ?? [])).filter { seen.insert($0.id).inserted && $0.displayTitle.localizedCaseInsensitiveContains(q) }
+        let machines = app.machines.filter { $0.id != app.activeMachineId && $0.name.localizedCaseInsensitiveContains(q) }
+        Section(found.isEmpty ? "No chats match" : "Chats") { ForEach(found) { row($0) } }
+        if !machines.isEmpty {
+            Section("Machines") {
+                ForEach(machines) { m in
+                    Button { app.selectMachine(m.id); query = "" } label: { Label("Switch to \(m.name)", systemImage: "desktopcomputer") }
+                }
+            }
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -145,6 +163,9 @@ struct SessionList: View {
                     } label: { Label("New chat", systemImage: "square.and.pencil") }
                     .disabled(app.activeMachine == nil)
                 }
+                if searching {
+                    searchResults
+                } else {
                 let pinned = chat.sessions.filter { $0.pinned == true }
                 if !pinned.isEmpty {
                     Section("Pinned") { ForEach(pinned) { row($0) } }
@@ -162,7 +183,11 @@ struct SessionList: View {
                     }
                     .onChange(of: showArchived) { if showArchived { chat.loadArchived() } }
                 }
+                }
             }
+            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search chats")
+            // Search covers archived chats too, so load them once a search starts.
+            .onChange(of: searching) { if searching { chat.loadArchived() } }
             .refreshable { chat.refreshSessions() }
             .navigationTitle("Chats")
             .navigationBarTitleDisplayMode(.inline)

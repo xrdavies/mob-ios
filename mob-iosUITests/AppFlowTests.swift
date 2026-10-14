@@ -46,6 +46,16 @@ final class AppFlowTests: XCTestCase {
         app.buttons["Chats"].tap()
         XCTAssertTrue(app.staticTexts["Recent"].waitForExistence(timeout: 10))
         shot("chats")
+        let search = app.searchFields["Search chats"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("chrome")
+        XCTAssertTrue(app.buttons.containing(NSPredicate(format: "label CONTAINS '使用chrome'")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Recent"].exists)
+        shot("search")
+        // iOS 26 closes search with a round button next to the field.
+        let close = app.buttons["Close"].firstMatch
+        if close.exists { close.tap() } else { app.buttons["Cancel"].firstMatch.tap() }
         app.buttons["Done"].tap()
         app.tabBars.buttons["Settings"].tap()
         XCTAssertTrue(app.staticTexts["Machines"].waitForExistence(timeout: 10))
