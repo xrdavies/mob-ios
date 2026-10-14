@@ -56,6 +56,7 @@ private struct DesktopCanvas: View {
     let snapshotWidth: Int
     @State private var snapshot: UIImage?
     @State private var snapshotError: String?
+    @State private var snapshotAt: Date?
 
     var body: some View {
         let live = app.vnc.state.status == .connected
@@ -72,17 +73,36 @@ private struct DesktopCanvas: View {
                 Text(placeholder).font(.caption).foregroundStyle(.white.opacity(0.7)).multilineTextAlignment(.center).padding()
             }
         }
+        .overlay(alignment: .bottomLeading) { if !live { snapshotLabel } }
         .task(id: live) {
             guard !live else { return }
             while !Task.isCancelled {
                 do {
                     snapshot = try await app.apiClient.screen(maxWidth: snapshotWidth)
+                    snapshotAt = Date()
                     snapshotError = nil
                 } catch {
                     if !(error is CancellationError) { snapshotError = readable(error) }
                 }
                 try? await Task.sleep(for: .seconds(2))
             }
+        }
+    }
+
+    /// "Snapshot · 17:33:05", or why snapshots fail (usually Screen Recording on the office Mac).
+    @ViewBuilder private var snapshotLabel: some View {
+        let time = snapshot == nil ? nil : snapshotAt?.formatted(date: .omitted, time: .standard)
+        let text: String? = switch (snapshotError, time) {
+        case (.some, .some(let t)): "Snapshot · \(t) · not updating"
+        case (.some, nil): "Snapshot unavailable. Check Screen Recording on the office Mac."
+        case (nil, .some(let t)): "Snapshot · \(t)"
+        default: nil
+        }
+        if let text {
+            Text(text).font(.caption2).foregroundStyle(.white)
+                .padding(.horizontal, 6).padding(.vertical, 3)
+                .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 6))
+                .padding(8)
         }
     }
 
