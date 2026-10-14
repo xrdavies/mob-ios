@@ -15,10 +15,11 @@ struct Dirty: Equatable {
     }
 }
 
-/// RFB 3.8 client: handshake (None or Apple Remote Desktop sign-in), then framebuffer updates
+/// RFB 3.8 client: handshake (None, VNC password or Apple Remote Desktop sign-in), then framebuffer updates
 /// and input. Ported from mob-android (itself from svnc's session).
 final class Rfb {
     static let none = 1
+    static let vncAuth = 2
     static let ard = 30
 
     static let raw: Int32 = 0
@@ -67,15 +68,23 @@ final class Rfb {
         let count = try await u8()
         if count == 0 { throw RfbError(message: "Screen Sharing refused the connection: \(try await reason())", userFixable: true) }
         let types = try await input.read(count).map(Int.init)
-        let signIn = !username.isEmpty && !password.isEmpty
+        // Like svnc: a user name signs in to that user's session (ARD); a password alone uses
+        // classic VNC Authentication, which lands on the login window.
+        let hasPassword = !password.isEmpty
+        let signIn = !username.isEmpty && hasPassword
         let chosen: Int
         if signIn && types.contains(Rfb.ard) { chosen = Rfb.ard }
+        else if hasPassword && types.contains(Rfb.vncAuth) { chosen = Rfb.vncAuth }
         else if types.contains(Rfb.none) { chosen = Rfb.none }
         else if types.contains(Rfb.ard) {
             throw RfbError(message: "Enter the office Mac's user name and password in Settings → Machines → Edit (Desktop sign-in)", userFixable: true)
+        } else if types.contains(Rfb.vncAuth) {
+            throw RfbError(message: "Enter the Screen Sharing (VNC) password in Settings → Machines → Edit (Desktop sign-in)", userFixable: true)
         } else { throw RfbError(message: "No supported sign-in method (server offers \(types))") }
         send([UInt8(chosen)])
-        if chosen == Rfb.ard {
+        if chosen == Rfb.vncAuth {
+            send(VncAuth.response(password: password, challenge: try await input.read(16)))
+        } else if chosen == Rfb.ard {
             let generator = try await u16()
             let keyLength = try await u16()
             let prime = try await input.read(keyLength)
@@ -84,7 +93,8 @@ final class Rfb {
         }
         if try await u32() != 0 {
             let why = (try? await reason()) ?? ""
-            let base = chosen == Rfb.ard ? "Sign-in failed: check the Mac user name and password." : "Sign-in failed."
+            let base = chosen == Rfb.ard ? "Sign-in failed: check the Mac user name and password."
+                : chosen == Rfb.vncAuth ? "Sign-in failed: check the Screen Sharing (VNC) password." : "Sign-in failed."
             throw RfbError(message: "\(base) \(why)".trimmingCharacters(in: .whitespaces), userFixable: true)
         }
 

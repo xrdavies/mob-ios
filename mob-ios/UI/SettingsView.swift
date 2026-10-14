@@ -120,11 +120,11 @@ private struct MachineEditor: View {
                 Section {
                     TextField("Mac user name", text: $machine.vncUsername)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    SecureField("Mac password", text: $machine.vncPassword)
+                    SecureField("Mac or VNC password", text: $machine.vncPassword)
                 } header: {
                     Text("Desktop sign-in (optional)")
                 } footer: {
-                    Text("Lets the live view sign in to Screen Sharing as this user. Stored on this phone only. Without it the desktop shows snapshots.")
+                    Text("With a user name the live view signs in as that user, like Screen Sharing.app. A Screen Sharing (VNC) password alone, with no user name, opens the login window. Stored on this phone only; without either the desktop shows snapshots.")
                 }
             }
             .navigationTitle(isNew ? "Add machine" : "Edit machine")

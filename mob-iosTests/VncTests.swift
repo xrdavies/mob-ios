@@ -84,6 +84,22 @@ final class VncTests: XCTestCase {
         XCTAssertEqual(sent[5][0], 3) // first full update request
     }
 
+    func testDesMatchesTheStandardTestVector() {
+        XCTAssertEqual(VncAuth.des(hex("133457799bbcdff1"), hex("0123456789abcdef")), hex("85e813540f0ab405"))
+        XCTAssertEqual(VncAuth.reverseBits(1), 0x80)
+        XCTAssertEqual(VncAuth.reverseBits(0x61), 0x86)
+    }
+
+    func testPasswordOnlyUsesVncAuth() async throws {
+        let challenge = (0..<16).map(UInt8.init)
+        let bytes = Array("RFB 003.889\n".utf8) + [2, 30, 2] + challenge + [0, 0, 0, 0] +
+            Rfb.u16(800) + Rfb.u16(600) + [UInt8](repeating: 0, count: 16) + [0, 0, 0, 0]
+        var sent: [[UInt8]] = []
+        _ = try await Rfb(input: Bytes(bytes), send: { sent.append($0) }, username: "", password: "secret").handshake()
+        XCTAssertEqual(sent[1], [2])
+        XCTAssertEqual(sent[2], VncAuth.response(password: "secret", challenge: challenge))
+    }
+
     func testArdOnlyServerAsksForCredentials() async {
         do {
             _ = try await Rfb(input: Bytes(server([30])), send: { _ in }, username: "", password: "").handshake()
