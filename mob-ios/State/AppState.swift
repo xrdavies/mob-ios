@@ -122,11 +122,13 @@ final class AppState: MachineEvents {
         do {
             let h = try await client.health()
             guard client === apiClient else { return }
+            if !isConnected { Log.add("\(activeMachine?.name ?? ""): connected, runners \((h.runners ?? []).map(\.name).joined(separator: ", "))") }
             health = h
             isConnected = h.ok
             healthError = nil
         } catch {
             guard client === apiClient, !(error is CancellationError) else { return }
+            if healthError != readable(error) { Log.error("\(activeMachine?.name ?? ""): health check failed: \(readable(error))") }
             isConnected = false
             health = nil
             healthError = readable(error)

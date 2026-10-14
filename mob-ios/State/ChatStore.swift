@@ -69,7 +69,10 @@ final class ChatStore {
         let gen = generation
         Task {
             do { try await block(client) } catch {
-                if gen == generation, !(error is CancellationError) { self.error = readable(error) }
+                if gen == generation, !(error is CancellationError) {
+                    self.error = readable(error)
+                    Log.error(readable(error))
+                }
             }
         }
     }
@@ -167,12 +170,15 @@ final class ChatStore {
                 do {
                     for try await e in client.events(client.url("tasks/\(task.id)/events", ["after": String(after)])) {
                         failures = 0
+                        if e.type == sseOpen { Log.add("turn \(task.id.prefix(8)): stream connected") }
                         guard e.type != sseOpen, let data = e.data.data(using: .utf8),
                               let ev = try? APIClient.decoder.decode(TaskEvent.self, from: data) else { continue }
+                        Log.add("turn \(task.id.prefix(8)) \(e.type): \(ev.status ?? ev.activity?.title ?? ev.question?.text ?? String((ev.message ?? "").prefix(80)))")
                         if gen == self.generation { self.apply(task.id, e.type, ev) }
                     }
                 } catch {
                     failures += 1
+                    if !Task.isCancelled { Log.error("turn \(task.id.prefix(8)): stream failed: \(readable(error))") }
                 }
                 // The stream ended or broke: wait, then reconnect while the turn still runs.
                 if Task.isCancelled || self.streamTask != task.id { break }

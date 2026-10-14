@@ -25,6 +25,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     private func id(_ m: Machine, _ s: Session, _ kind: String) -> String { "\(m.id)/\(s.id)/\(kind)" }
 
     private func post(_ id: String, title: String, body: String, m: Machine, s: Session, urgent: Bool) {
+        Log.add("notification: \(title) — \(body)")
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body

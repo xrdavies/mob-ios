@@ -147,6 +147,7 @@ struct Composer: View {
                     a.uploadId = try await client.upload(image, name: "photo-\(i + 1)").id
                 } catch {
                     a.error = readable(error)
+                    Log.error("upload failed: \(readable(error))")
                 }
             }
         }

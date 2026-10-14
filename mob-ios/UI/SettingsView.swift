@@ -47,6 +47,11 @@ struct SettingsView: View {
                 } footer: {
                     Text("mob notifies you when the agent asks something or a task finishes, on every office Mac in the list. While mob is open this is immediate. In the background iOS does not allow a live connection, so mob checks when iOS lets it refresh, usually every 15 minutes or more.")
                 }
+                Section {
+                    NavigationLink("Log") { LogView() }
+                } footer: {
+                    Text("Connections, event streams, live view and errors, for troubleshooting.")
+                }
                 Section("About") {
                     LabeledContent("mob-ios", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")
                     Text("MIT License").foregroundStyle(.secondary)

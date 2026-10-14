@@ -61,6 +61,10 @@ final class AppFlowTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Machines"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Connected to'")).firstMatch.waitForExistence(timeout: 20))
         shot("settings")
+        app.swipeUp()
+        app.buttons["Log"].tap()
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'events connected'")).firstMatch.waitForExistence(timeout: 10))
+        shot("log")
     }
 
     func testDesktopThumbnailAndFullScreen() {

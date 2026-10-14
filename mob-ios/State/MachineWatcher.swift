@@ -37,6 +37,7 @@ final class MachineWatcher {
                         if let id = e.id { lastId = id }
                         switch e.type {
                         case sseOpen:
+                            Log.add("\(machine.name): events connected")
                             failures = 0
                             events.onLive(machine, true)
                         case "session":
@@ -54,6 +55,7 @@ final class MachineWatcher {
                                 events.onQueue(machine, q.queued?.count ?? 0)
                             }
                         case "reset":
+                            Log.add("\(machine.name): events reset, refetching")
                             try await self.seed(client)
                             events.onReset(machine)
                         default: break
@@ -61,6 +63,7 @@ final class MachineWatcher {
                     }
                 } catch {
                     // Offline or mobd restarted; retry with backoff below.
+                    if !Task.isCancelled { Log.error("\(machine.name): events failed: \(readable(error))") }
                 }
                 if Task.isCancelled { return }
                 failures += 1

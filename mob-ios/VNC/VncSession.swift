@@ -39,6 +39,7 @@ final class VncSession {
     func connect(url: URL, username: String, password: String) {
         disconnect()
         state = VncState(status: .connecting, detail: "Connecting…")
+        Log.add("live view: connecting to \(url.absoluteString)")
         let c = Connection(url: url, username: username, password: password, owner: self)
         conn = c
         c.start()
@@ -61,6 +62,7 @@ final class VncSession {
 
     fileprivate func connected(_ c: Connection, width: Int, height: Int) {
         guard conn === c else { return }
+        if state.status != .connected { Log.add("live view: connected \(width)×\(height)") }
         let control = state.control && state.status == .connected
         state = VncState(status: .connected, width: width, height: height, control: control)
     }
@@ -72,6 +74,7 @@ final class VncSession {
 
     fileprivate func failed(_ c: Connection, _ message: String) {
         guard conn === c else { return }
+        Log.error("live view: \(message)")
         conn = nil
         image = nil
         state = VncState(status: .error, detail: message)
