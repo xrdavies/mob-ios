@@ -56,12 +56,26 @@ final class AppState: MachineEvents {
     private let defaults = UserDefaults.standard
 
     init() {
-        let stored = UserDefaults.standard.data(forKey: "machines").flatMap { try? JSONDecoder().decode([Machine].self, from: $0) } ?? []
+        let data = UserDefaults.standard.data(forKey: "machines")
+        var stored = data.flatMap { try? JSONDecoder().decode([Machine].self, from: $0) } ?? []
+        // Older versions kept the desktop password in this JSON: move it to the Keychain, and only
+        // rewrite the JSON once every password is there (otherwise try again next launch).
+        let legacy = data.map(Machine.legacyPasswords) ?? [:]
+        let moved = legacy.allSatisfy { Keychain.set($0.value, for: "\($0.key).vncPassword") }
+        var changed = !legacy.isEmpty
+        // Machines from before pairing, or whose token is gone, need pairing.
+        for i in stored.indices where !stored[i].needsPairing && stored[i].token == nil {
+            stored[i].needsPairing = true
+            changed = true
+        }
         let saved = UserDefaults.standard.string(forKey: "activeMachine")
         machines = stored
         activeMachineId = stored.contains { $0.id == saved } ? saved : stored.first?.id
         turnPrefs = (UserDefaults.standard.dictionary(forKey: "turnPrefs") as? [String: String]) ?? [:]
-        apiClient = APIClient(baseURL: "")
+        apiClient = APIClient(baseURL: "", token: nil)
+        if changed && moved { saveMachines() }
+        chat.onUnauthorized = { [weak self] id in self?.markNeedsPairing(id) }
+        vnc.onUnauthorized = { [weak self] in if let id = self?.activeMachineId { self?.markNeedsPairing(id) } }
         notifier.onOpen = { [weak self] m, s in self?.openChat(machine: m, session: s) }
         notifier.onAnswer = { [weak self] m, task, question, answer, approved in
             await self?.answerFromNotification(machine: m, task: task, question: question, answer: answer, approved: approved)
@@ -75,15 +89,19 @@ final class AppState: MachineEvents {
         defaults.set(try? JSONEncoder().encode(machines), forKey: "machines")
     }
 
+    /// A client for `m` with its device token from the Keychain.
+    func client(for m: Machine) -> APIClient { APIClient(baseURL: m.mobdUrl, token: m.token) }
+
     /// Points the API client, chats, health and live view at the active machine.
     private func activate() {
         let m = activeMachine
         defaults.set(m?.id, forKey: "activeMachine")
-        apiClient = APIClient(baseURL: m?.mobdUrl ?? "")
+        apiClient = m.map(client(for:)) ?? APIClient(baseURL: "", token: nil)
         health = nil
         isConnected = false
         healthError = nil
-        chat.attach(m == nil ? nil : apiClient, machine: m?.id ?? "")
+        // An unpaired machine gets no requests until it is paired again.
+        chat.attach(m == nil || m?.needsPairing == true ? nil : apiClient, machine: m?.id ?? "")
         chat.live = m.map { liveMachines.contains($0.id) } ?? false
         healthTask?.cancel()
         healthTask = Task { [weak self] in
@@ -101,9 +119,16 @@ final class AppState: MachineEvents {
         activate()
     }
 
-    func newMachine() -> Machine { Machine(id: UUID().uuidString, name: "", mobdUrl: "") }
+    /// Saves the name and desktop sign-in from the editor; address and pairing stay as stored.
+    func save(_ m: Machine, vncPassword: String) {
+        guard var stored = machines.first(where: { $0.id == m.id }) else { return }
+        stored.name = m.name
+        stored.vncUsername = m.vncUsername
+        Keychain.set(vncPassword, for: stored.vncPasswordAccount)
+        store(stored)
+    }
 
-    func save(_ m: Machine) {
+    private func store(_ m: Machine) {
         if let i = machines.firstIndex(where: { $0.id == m.id }) { machines[i] = m } else { machines.append(m) }
         saveMachines()
         if activeMachineId == nil || m.id == activeMachineId {
@@ -113,9 +138,42 @@ final class AppState: MachineEvents {
         syncWatchers()
     }
 
+    /// Saves a successful pairing (a new machine, or `existing` paired again) and switches to it.
+    /// The address and token change together, so the old token never goes to a new address.
+    func completePairing(_ link: PairLink, _ result: PairResult, existing: Machine?, name: String) throws {
+        var m = existing ?? Machine(id: UUID().uuidString, name: name, mobdUrl: link.origin)
+        guard Keychain.set(result.token, for: m.tokenAccount) else {
+            throw PairError(message: "Paired, but the credential could not be stored in the Keychain. Run mobd link again and retry.")
+        }
+        m.mobdUrl = link.origin
+        m.serverId = result.serverId
+        m.clientId = result.clientId
+        m.needsPairing = false
+        Log.add("\(m.name): paired with \(link.origin)")
+        store(m)
+        selectMachine(m.id)
+    }
+
+    /// mobd refused the machine's token: stop using it until the device is paired again.
+    func markNeedsPairing(_ id: String) {
+        guard let i = machines.firstIndex(where: { $0.id == id }), !machines[i].needsPairing else { return }
+        Log.error("\(machines[i].name): mobd refused this device, pair again")
+        machines[i].needsPairing = true
+        saveMachines()
+        if id == activeMachineId { activate() }
+        syncWatchers()
+    }
+
+    /// For views that call the active machine directly (tasks, snapshots, uploads).
+    func noteFailure(_ error: Error) {
+        if error.isUnauthorized, let id = activeMachineId { markNeedsPairing(id) }
+    }
+
     func delete(_ m: Machine) {
         machines.removeAll { $0.id == m.id }
         saveMachines()
+        Keychain.delete(m.tokenAccount)
+        Keychain.delete(m.vncPasswordAccount)
         waiting[m.id] = nil
         defaults.removeObject(forKey: "session.\(m.id)")
         if m.id == activeMachineId {
@@ -128,9 +186,15 @@ final class AppState: MachineEvents {
     func checkHealth() { Task { await checkHealthNow() } }
 
     private func checkHealthNow() async {
-        guard activeMachine != nil else {
+        guard let m = activeMachine else {
             isConnected = false
             health = nil
+            return
+        }
+        guard !m.needsPairing else {
+            isConnected = false
+            health = nil
+            healthError = "This device needs to be paired again"
             return
         }
         let client = apiClient
@@ -143,6 +207,7 @@ final class AppState: MachineEvents {
             healthError = nil
         } catch {
             guard client === apiClient, !(error is CancellationError) else { return }
+            if error.isUnauthorized { return markNeedsPairing(m.id) }
             if healthError != readable(error) { Log.error("\(activeMachine?.name ?? ""): health check failed: \(readable(error))") }
             isConnected = false
             health = nil
@@ -169,8 +234,8 @@ final class AppState: MachineEvents {
     }
 
     func connectDesktop() {
-        guard let m = activeMachine else { return }
-        vnc.connect(url: apiClient.vncURL, username: m.vncUsername, password: m.vncPassword)
+        guard let m = activeMachine, !m.needsPairing else { return vnc.disconnect() }
+        vnc.connect(request: apiClient.vncRequest, username: m.vncUsername, password: m.vncPassword)
     }
 
     func closeLiveView() {
@@ -180,15 +245,19 @@ final class AppState: MachineEvents {
 
     // MARK: - Events and notifications
 
-    /// Starts a watcher for each machine, and restarts one whose URL changed.
+    /// Starts a watcher for each paired machine, and stops or restarts one whose URL, token or
+    /// pairing changed.
     private func syncWatchers() {
         let byId = Dictionary(uniqueKeysWithValues: machines.map { ($0.id, $0) })
-        for (id, w) in watchers where byId[id]?.mobdUrl != w.machine.mobdUrl {
+        for (id, w) in watchers {
+            if let m = byId[id], !m.needsPairing, m.mobdUrl == w.machine.mobdUrl, m.token == w.token { continue }
             w.stop()
             watchers[id] = nil
             liveMachines.remove(id)
         }
-        for m in machines where watchers[m.id] == nil { watchers[m.id] = MachineWatcher(m, events: self) }
+        for m in machines where watchers[m.id] == nil && !m.needsPairing {
+            watchers[m.id] = MachineWatcher(m, client: client(for: m), events: self)
+        }
     }
 
     /// Opens a chat on a machine (from a notification).
@@ -227,7 +296,8 @@ final class AppState: MachineEvents {
     /// Fetches the pending question so the notification can show it.
     private func notifyQuestion(_ m: Machine, _ s: Session) {
         Task {
-            let q = try? await APIClient(baseURL: m.mobdUrl).session(s.id).questions?.last { $0.isPending }
+            var q: Question?
+            do { q = try await client(for: m).session(s.id).questions?.last { $0.isPending } } catch { if error.isUnauthorized { markNeedsPairing(m.id) } }
             notifier.question(m, s, q)
         }
     }
@@ -235,12 +305,14 @@ final class AppState: MachineEvents {
     /// Answers a question from a notification action; returns an error message on failure.
     private func answerFromNotification(machine: String, task: String, question: String, answer: String?, approved: Bool?) async -> String? {
         guard let m = machines.first(where: { $0.id == machine }) else { return "The machine was removed" }
+        guard !m.needsPairing else { return "This device needs to be paired again" }
         do {
-            try await APIClient(baseURL: m.mobdUrl).answer(task: task, question: question, answer: answer, approved: approved)
+            try await client(for: m).answer(task: task, question: question, answer: answer, approved: approved)
             if m.id == activeMachineId { chat.refreshAll() }
             return nil
         } catch {
-            return error.localizedDescription
+            if error.isUnauthorized { markNeedsPairing(m.id) }
+            return readable(error)
         }
     }
 
@@ -255,6 +327,8 @@ final class AppState: MachineEvents {
 
     func onQueue(_ m: Machine, _ queued: Int) { self.queued[m.id] = queued }
 
+    func onUnauthorized(_ m: Machine) { markNeedsPairing(m.id) }
+
     func onLive(_ m: Machine, _ live: Bool) {
         if live { liveMachines.insert(m.id) } else { liveMachines.remove(m.id) }
         guard m.id == activeMachineId else { return }
@@ -268,8 +342,8 @@ final class AppState: MachineEvents {
     /// each machine's chats with what was seen last and notify about the differences.
     func backgroundCheck() async {
         var seen = (defaults.dictionary(forKey: "seenSessions") as? [String: String]) ?? [:]
-        for m in machines {
-            guard let list = try? await APIClient(baseURL: m.mobdUrl).sessions() else { continue }
+        for m in machines where !m.needsPairing {
+            guard let list = await sessions(m) else { continue }
             for s in list {
                 let key = "\(m.id)/\(s.id)"
                 let state = "\(s.status ?? "")|\(s.waiting == true)"
@@ -289,10 +363,18 @@ final class AppState: MachineEvents {
     /// Remembers the current chat states so the next background check only reports changes.
     func rememberSessions() async {
         var seen: [String: String] = [:]
-        for m in machines {
-            guard let list = try? await APIClient(baseURL: m.mobdUrl).sessions() else { continue }
+        for m in machines where !m.needsPairing {
+            guard let list = await sessions(m) else { continue }
             for s in list { seen["\(m.id)/\(s.id)"] = "\(s.status ?? "")|\(s.waiting == true)" }
         }
         defaults.set(seen, forKey: "seenSessions")
+    }
+
+    /// A machine's chats, or nil when unreachable; a refused token marks it for pairing.
+    private func sessions(_ m: Machine) async -> [Session]? {
+        do { return try await client(for: m).sessions() } catch {
+            if error.isUnauthorized { markNeedsPairing(m.id) }
+            return nil
+        }
     }
 }

@@ -4,6 +4,7 @@ struct ChatView: View {
     @Environment(AppState.self) private var app
     let openSettings: () -> Void
     @State private var showChats = false
+    @State private var pairing: PairRequest?
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     private var chat: ChatStore { app.chat }
@@ -78,6 +79,7 @@ struct ChatView: View {
                 }
             }
             .sheet(isPresented: $showChats) { SessionList(openSettings: openSettings) }
+            .sheet(item: $pairing) { PairingSheet(existing: $0.machine) }
             .fullScreenCover(isPresented: $app.showLiveView) { LiveView() }
             .alert("Something went wrong", isPresented: Binding(get: { chat.error != nil }, set: { if !$0 { chat.error = nil } })) {
                 Button("OK", role: .cancel) {}
@@ -127,6 +129,10 @@ struct ChatView: View {
         if app.activeMachine == nil {
             empty("Add your office Mac to start", "Settings → Machines → Add machine") {
                 Button("Open Settings", action: openSettings).buttonStyle(.borderedProminent)
+            }
+        } else if let m = app.activeMachine, m.needsPairing {
+            empty("This device needs to be paired again", "mobd on \(m.name) does not accept this device. Run mobd link on the office Mac, then pair with the new link or QR code.") {
+                Button("Pair again") { pairing = PairRequest(machine: m) }.buttonStyle(.borderedProminent)
             }
         } else if chat.currentId == nil {
             empty("New chat on \(app.activeMachine?.name ?? "")", "Ask the agent to do something on the office Mac")

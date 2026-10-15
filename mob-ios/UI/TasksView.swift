@@ -12,6 +12,8 @@ struct TasksView: View {
             Group {
                 if app.activeMachine == nil {
                     message("Add your office Mac in Settings")
+                } else if app.activeMachine?.needsPairing == true {
+                    message("This device needs to be paired again\nSettings → Machines → Pair again")
                 } else if let tasks {
                     if tasks.isEmpty {
                         message("No tasks yet\nTasks you create will appear here")
@@ -43,12 +45,13 @@ struct TasksView: View {
     }
 
     private func load() async {
-        guard app.activeMachine != nil else { return }
+        guard let m = app.activeMachine, !m.needsPairing else { return }
         do {
             tasks = try await app.apiClient.tasks().sorted { ($0.createdAt ?? "") > ($1.createdAt ?? "") }
             error = nil
         } catch {
             if !(error is CancellationError) { self.error = readable(error) }
+            app.noteFailure(error)
         }
     }
 

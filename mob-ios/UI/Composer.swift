@@ -148,6 +148,7 @@ struct Composer: View {
                 } catch {
                     a.error = readable(error)
                     Log.error("upload failed: \(readable(error))")
+                    app.noteFailure(error)
                 }
             }
         }

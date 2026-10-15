@@ -12,6 +12,8 @@ protocol MachineEvents: AnyObject {
     func onSeed(_ m: Machine, _ sessions: [Session])
     /// Turns waiting for the desktop on this machine (all chats).
     func onQueue(_ m: Machine, _ queued: Int)
+    /// mobd refused the token: the watcher has stopped.
+    func onUnauthorized(_ m: Machine)
 }
 
 /// Follows one machine's GET /events (session summaries) and remembers the last summary of
@@ -19,15 +21,17 @@ protocol MachineEvents: AnyObject {
 @MainActor
 final class MachineWatcher {
     let machine: Machine
+    /// The token it connects with; a new one restarts the watcher.
+    let token: String?
     private var known: [String: Session] = [:]
     private var task: Task<Void, Never>?
     private weak var events: MachineEvents?
 
-    init(_ machine: Machine, events: MachineEvents) {
+    init(_ machine: Machine, client: APIClient, events: MachineEvents) {
         self.machine = machine
+        self.token = client.token
         self.events = events
         task = Task { [weak self, weak events] in
-            let client = APIClient(baseURL: machine.mobdUrl)
             var lastId: String?
             var failures = 0
             while !Task.isCancelled {
@@ -64,8 +68,13 @@ final class MachineWatcher {
                         }
                     }
                 } catch {
-                    // Offline or mobd restarted; retry with backoff below.
+                    // Offline or mobd restarted; retry with backoff below. A refused token never recovers.
                     if !Task.isCancelled { Log.error("\(machine.name): events failed: \(readable(error))") }
+                    if error.isUnauthorized {
+                        events?.onLive(machine, false)
+                        events?.onUnauthorized(machine)
+                        return
+                    }
                 }
                 if Task.isCancelled { return }
                 failures += 1

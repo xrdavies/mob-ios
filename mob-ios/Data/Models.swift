@@ -257,12 +257,56 @@ struct TaskEvent: Codable {
     let timestamp: String?
 }
 
-/// An office Mac running mobd. Stored on the phone only.
+/// An office Mac running mobd. Stored on the phone only; the device token and desktop password
+/// live in the Keychain, not in this JSON.
 struct Machine: Codable, Identifiable, Hashable {
     var id: String
     var name: String
     var mobdUrl: String
     /// macOS user for Screen Sharing sign-in (ARD), so the live view lands in that user's session.
     var vncUsername: String = ""
-    var vncPassword: String = ""
+    /// The office's ID from pairing; nil for machines added before pairing existed.
+    var serverId: String?
+    var clientId: String?
+    /// mobd refused the token (or there is none): run mobd link and pair again.
+    var needsPairing = false
+
+    var tokenAccount: String { "\(id).token" }
+    var vncPasswordAccount: String { "\(id).vncPassword" }
+    var token: String? { Keychain.get(tokenAccount) }
+    var vncPassword: String { Keychain.get(vncPasswordAccount) ?? "" }
+}
+
+extension Machine {
+    private enum Keys: String, CodingKey { case id, name, mobdUrl, vncUsername, serverId, clientId, needsPairing }
+
+    /// Older saves have no pairing fields: such machines need pairing.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        mobdUrl = try c.decodeIfPresent(String.self, forKey: .mobdUrl) ?? ""
+        vncUsername = try c.decodeIfPresent(String.self, forKey: .vncUsername) ?? ""
+        serverId = try c.decodeIfPresent(String.self, forKey: .serverId)
+        clientId = try c.decodeIfPresent(String.self, forKey: .clientId)
+        needsPairing = try c.decodeIfPresent(Bool.self, forKey: .needsPairing) ?? (serverId == nil)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Keys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(mobdUrl, forKey: .mobdUrl)
+        try c.encode(vncUsername, forKey: .vncUsername)
+        try c.encodeIfPresent(serverId, forKey: .serverId)
+        try c.encodeIfPresent(clientId, forKey: .clientId)
+        try c.encode(needsPairing, forKey: .needsPairing)
+    }
+
+    /// Desktop passwords that older versions saved in the machines JSON, by machine ID.
+    static func legacyPasswords(_ data: Data) -> [String: String] {
+        struct Old: Decodable { let id: String; let vncPassword: String? }
+        let list = (try? JSONDecoder().decode([Old].self, from: data)) ?? []
+        return Dictionary(list.compactMap { o in o.vncPassword.flatMap { $0.isEmpty ? nil : (o.id, $0) } }, uniquingKeysWith: { a, _ in a })
+    }
 }

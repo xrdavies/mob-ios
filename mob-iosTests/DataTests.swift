@@ -91,6 +91,6 @@ final class DataTests: XCTestCase {
     func testNormalizeURL() {
         XCTAssertEqual(APIClient.normalize("192.168.1.5:8080").absoluteString, "http://192.168.1.5:8080/")
         XCTAssertEqual(APIClient.normalize("https://mac.local/ ").absoluteString, "https://mac.local/")
-        XCTAssertEqual(APIClient(baseURL: "10.0.0.2:8080").vncURL.absoluteString, "ws://10.0.0.2:8080/vnc")
+        XCTAssertEqual(APIClient(baseURL: "10.0.0.2:8080", token: nil).vncURL.absoluteString, "ws://10.0.0.2:8080/vnc")
     }
 }

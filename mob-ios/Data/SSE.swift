@@ -43,7 +43,7 @@ extension APIClient {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    var req = URLRequest(url: url)
+                    var req = request(url)
                     req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
                     if let lastEventId { req.setValue(lastEventId, forHTTPHeaderField: "Last-Event-ID") }
                     let (bytes, response) = try await streamSession.bytes(for: req)

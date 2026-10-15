@@ -6,11 +6,17 @@ struct APIError: LocalizedError {
     let message: String
     let status: Int?
     var errorDescription: String? { message }
+    /// mobd no longer accepts this device's token.
+    var isUnauthorized: Bool { status == 401 }
+}
+
+extension Error {
+    var isUnauthorized: Bool { (self as? APIError)?.isUnauthorized == true }
 }
 
 /// A readable message for any request failure.
 func readable(_ error: Error) -> String {
-    if let e = error as? APIError { return e.message }
+    if let e = error as? APIError { return e.isUnauthorized ? "This device needs to be paired again" : e.message }
     if let e = error as? URLError {
         switch e.code {
         case .cannotConnectToHost, .cannotFindHost, .networkConnectionLost, .notConnectedToInternet: return "Cannot reach mobd"
@@ -24,22 +30,31 @@ func readable(_ error: Error) -> String {
 /// HTTP client for one mobd.
 final class APIClient {
     let baseURL: URL
+    /// Sent as "Authorization: Bearer …" on every request; nil before pairing.
+    let token: String?
     let session: URLSession
     /// For event streams: an idle stream sends nothing, so it must not time out.
     let streamSession: URLSession
 
     static let decoder = JSONDecoder()
 
-    init(baseURL: String) {
+    init(baseURL: String, token: String?) {
         self.baseURL = APIClient.normalize(baseURL)
+        self.token = token
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 10
         config.waitsForConnectivity = false
-        session = URLSession(configuration: config)
+        // The token must not follow a redirect to another origin.
+        session = URLSession(configuration: config, delegate: SameOriginRedirects(), delegateQueue: nil)
         let stream = URLSessionConfiguration.default
         stream.timeoutIntervalForRequest = .infinity
         stream.timeoutIntervalForResource = .infinity
-        streamSession = URLSession(configuration: stream)
+        streamSession = URLSession(configuration: stream, delegate: SameOriginRedirects(), delegateQueue: nil)
+    }
+
+    deinit {
+        session.finishTasksAndInvalidate()
+        streamSession.finishTasksAndInvalidate()
     }
 
     /// Turns "192.168.1.5:8080" or "http://host:8080/" into a base URL ending in "/".
@@ -66,6 +81,21 @@ final class APIClient {
         return c.url!
     }
 
+    /// The /vnc WebSocket handshake; native clients authorize with the header, not a ticket.
+    var vncRequest: URLRequest {
+        var req = request(vncURL)
+        req.setValue("binary", forHTTPHeaderField: "Sec-WebSocket-Protocol")
+        return req
+    }
+
+    /// Every request to mobd starts here, so each one carries the token.
+    func request(_ url: URL, method: String = "GET") -> URLRequest {
+        var req = URLRequest(url: url)
+        req.httpMethod = method
+        if let token, !token.isEmpty { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        return req
+    }
+
     // MARK: - Requests
 
     private func check(_ data: Data, _ response: URLResponse) throws {
@@ -77,8 +107,7 @@ final class APIClient {
     }
 
     private func send(_ method: String, _ path: String, query: [String: String] = [:], body: [String: Any]? = nil) async throws -> Data {
-        var req = URLRequest(url: url(path, query))
-        req.httpMethod = method
+        var req = request(url(path, query), method: method)
         if let body {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -150,7 +179,7 @@ final class APIClient {
     }
 
     func image(_ url: URL) async throws -> UIImage {
-        let (data, response) = try await session.data(from: url)
+        let (data, response) = try await session.data(for: request(url))
         try check(data, response)
         guard let image = UIImage(data: data) else { throw APIError(message: "Not an image", status: nil) }
         return image
@@ -175,8 +204,7 @@ final class APIClient {
         body.append("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"\(name).jpg\"\r\nContent-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)
         body.append(jpeg)
         body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
-        var req = URLRequest(url: url("uploads"))
-        req.httpMethod = "POST"
+        var req = request(url("uploads"), method: "POST")
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         let (data, response) = try await session.upload(for: req, from: body)
         try check(data, response)

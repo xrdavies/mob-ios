@@ -75,8 +75,8 @@ private struct DesktopCanvas: View {
             }
         }
         .overlay(alignment: .bottomLeading) { if !live { snapshotLabel } }
-        .task(id: live) {
-            guard !live else { return }
+        .task(id: [live, app.activeMachine?.needsPairing == true]) {
+            guard !live, app.activeMachine?.needsPairing != true else { return }
             while !Task.isCancelled {
                 do {
                     snapshot = try await app.apiClient.screen(maxWidth: snapshotWidth)
@@ -84,6 +84,7 @@ private struct DesktopCanvas: View {
                     snapshotError = nil
                 } catch {
                     if !(error is CancellationError) { snapshotError = readable(error) }
+                    if error.isUnauthorized { return app.noteFailure(error) }
                 }
                 try? await Task.sleep(for: .seconds(2))
             }

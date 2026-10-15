@@ -24,6 +24,8 @@ final class VncSession {
     private(set) var modifiers: [UInt32] = []
 
     @ObservationIgnored private var conn: Connection?
+    /// mobd refused the device token on the handshake.
+    @ObservationIgnored var onUnauthorized: (() -> Void)?
 
     static let buttonLeft = 1
     static let buttonRight = 4
@@ -36,11 +38,11 @@ final class VncSession {
     static let xkMeta: UInt32 = 0xFFE7
     private static let shifted = Set("~!@#$%^&*()_+{}|:\"<>?")
 
-    func connect(url: URL, username: String, password: String) {
+    func connect(request: URLRequest, username: String, password: String) {
         disconnect()
         state = VncState(status: .connecting, detail: "Connecting…")
-        Log.add("live view: connecting to \(url.absoluteString)")
-        let c = Connection(url: url, username: username, password: password, owner: self)
+        Log.add("live view: connecting to \(request.url?.absoluteString ?? "")")
+        let c = Connection(request: request, username: username, password: password, owner: self)
         conn = c
         c.start()
     }
@@ -72,8 +74,9 @@ final class VncSession {
         self.image = image
     }
 
-    fileprivate func failed(_ c: Connection, _ message: String) {
+    fileprivate func failed(_ c: Connection, _ message: String, unauthorized: Bool = false) {
         guard conn === c else { return }
+        if unauthorized { onUnauthorized?() }
         Log.error("live view: \(message)")
         conn = nil
         image = nil
@@ -184,8 +187,9 @@ private final class Connection: @unchecked Sendable {
     /// Set once the handshake is done; input goes through it.
     private(set) var rfb: Rfb?
 
-    init(url: URL, username: String, password: String, owner: VncSession) {
-        task = URLSession.shared.webSocketTask(with: url, protocols: ["binary"])
+    init(request: URLRequest, username: String, password: String, owner: VncSession) {
+        // The request carries Authorization and Sec-WebSocket-Protocol: binary.
+        task = URLSession.shared.webSocketTask(with: request)
         task.maximumMessageSize = 16 << 20
         self.username = username
         self.password = password
@@ -226,16 +230,18 @@ private final class Connection: @unchecked Sendable {
         } catch {
             if closed { return }
             let message: String
+            var unauthorized = false
             if let http = task.response as? HTTPURLResponse, http.statusCode != 101 {
+                unauthorized = http.statusCode == 401
                 message = http.statusCode == 502
                     ? "Screen Sharing is off on the office Mac (System Settings → General → Sharing)"
-                    : "Live view failed: HTTP \(http.statusCode)"
+                    : unauthorized ? "This device needs to be paired again" : "Live view failed: HTTP \(http.statusCode)"
             } else if let e = error as? RfbError {
                 message = e.message
             } else {
                 message = readable(error)
             }
-            await MainActor.run { owner?.failed(self, message) }
+            await MainActor.run { owner?.failed(self, message, unauthorized: unauthorized) }
         }
     }
 

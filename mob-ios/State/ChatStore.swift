@@ -29,6 +29,8 @@ final class ChatStore {
     var error: String?
     /// True while the machine's global event stream is connected; polling then only backs it up.
     @ObservationIgnored var live = false
+    /// mobd refused the token of this machine; AppState marks it for pairing and detaches.
+    @ObservationIgnored var onUnauthorized: ((String) -> Void)?
 
     @ObservationIgnored private var api: APIClient?
     @ObservationIgnored private var machineId = ""
@@ -63,6 +65,13 @@ final class ChatStore {
         open(UserDefaults.standard.string(forKey: key))
     }
 
+    /// True (and reported once) when `error` is a refused token for the current machine.
+    private func unauthorized(_ error: Error, _ gen: Int) -> Bool {
+        guard error.isUnauthorized else { return false }
+        if gen == generation { onUnauthorized?(machineId) }
+        return true
+    }
+
     /// Runs `block` against the current machine; reports failures unless the machine changed.
     private func run(_ block: @escaping (APIClient) async throws -> Void) {
         guard let client = api else { return }
@@ -71,6 +80,7 @@ final class ChatStore {
             do { try await block(client) } catch {
                 if gen == generation, !(error is CancellationError) {
                     self.error = readable(error)
+                    _ = unauthorized(error, gen)
                     Log.error(readable(error))
                 }
             }
@@ -89,6 +99,7 @@ final class ChatStore {
             }
         } catch {
             // The health check reports connection problems; the list keeps its last state.
+            _ = unauthorized(error, gen)
         }
     }
 
@@ -132,7 +143,7 @@ final class ChatStore {
                     if self.detail?.busy != true { self.cancelling = false }
                     self.followTurn(client, gen)
                 } catch {
-                    if Task.isCancelled { break }
+                    if Task.isCancelled || self.unauthorized(error, gen) { break }
                     if first, (error as? APIError)?.status == 404 {
                         // The saved chat was deleted elsewhere.
                         if gen == self.generation { self.open(nil) }
@@ -179,6 +190,7 @@ final class ChatStore {
                 } catch {
                     failures += 1
                     if !Task.isCancelled { Log.error("turn \(task.id.prefix(8)): stream failed: \(readable(error))") }
+                    if self.unauthorized(error, gen) { break }
                 }
                 // The stream ended or broke: wait, then reconnect while the turn still runs.
                 if Task.isCancelled || self.streamTask != task.id { break }

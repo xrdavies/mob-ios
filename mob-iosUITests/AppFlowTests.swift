@@ -1,7 +1,8 @@
 import XCTest
 
-/// Drives the app against a real mobd. Expects a machine saved in the simulator's defaults
-/// (the app's own Settings, or `defaults write com.xrdavies.mob-ios machines -data …`).
+/// Drives the app against a real mobd. Expects a paired machine in the simulator: pair it once in
+/// the app's Settings → Add machine with a `mobd link` link. The device token lives in the Keychain,
+/// so a machine seeded with `defaults write com.xrdavies.mob-ios machines -data …` needs pairing.
 final class AppFlowTests: XCTestCase {
     private var app: XCUIApplication!
 
