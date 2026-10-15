@@ -132,10 +132,14 @@ final class APIClient {
     func steer(_ taskId: String, prompt: String) async throws { _ = try await send("POST", "tasks/\(taskId)/steer", body: ["prompt": prompt]) }
 
     func answer(_ q: Question, answer: String?, approved: Bool?) async throws {
+        try await self.answer(task: q.taskId, question: q.id, answer: answer, approved: approved)
+    }
+
+    func answer(task: String, question: String, answer: String?, approved: Bool?) async throws {
         var body: [String: Any] = [:]
         if let answer, !answer.isEmpty { body["answer"] = answer }
         if let approved { body["approved"] = approved }
-        _ = try await send("POST", "tasks/\(q.taskId)/questions/\(q.id)/answer", body: body)
+        _ = try await send("POST", "tasks/\(task)/questions/\(question)/answer", body: body)
     }
 
     /// A desktop snapshot from GET /screen.

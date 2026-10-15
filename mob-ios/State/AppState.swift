@@ -63,6 +63,9 @@ final class AppState: MachineEvents {
         turnPrefs = (UserDefaults.standard.dictionary(forKey: "turnPrefs") as? [String: String]) ?? [:]
         apiClient = APIClient(baseURL: "")
         notifier.onOpen = { [weak self] m, s in self?.openChat(machine: m, session: s) }
+        notifier.onAnswer = { [weak self] m, task, question, answer, approved in
+            await self?.answerFromNotification(machine: m, task: task, question: question, answer: answer, approved: approved)
+        }
         AppState.shared = self
         activate()
         syncWatchers()
@@ -225,7 +228,19 @@ final class AppState: MachineEvents {
     private func notifyQuestion(_ m: Machine, _ s: Session) {
         Task {
             let q = try? await APIClient(baseURL: m.mobdUrl).session(s.id).questions?.last { $0.isPending }
-            notifier.question(m, s, approval: q?.isApproval == true, text: q?.text)
+            notifier.question(m, s, q)
+        }
+    }
+
+    /// Answers a question from a notification action; returns an error message on failure.
+    private func answerFromNotification(machine: String, task: String, question: String, answer: String?, approved: Bool?) async -> String? {
+        guard let m = machines.first(where: { $0.id == machine }) else { return "The machine was removed" }
+        do {
+            try await APIClient(baseURL: m.mobdUrl).answer(task: task, question: question, answer: answer, approved: approved)
+            if m.id == activeMachineId { chat.refreshAll() }
+            return nil
+        } catch {
+            return error.localizedDescription
         }
     }
 
