@@ -29,7 +29,7 @@ struct DesktopThumbnail: View {
     var maxHeight: CGFloat = 240
 
     var body: some View {
-        let s = app.vnc.state
+        let s = app.liveState
         let aspect = s.width > 0 && s.height > 0 ? CGFloat(s.width) / CGFloat(s.height) : 16 / 10
         DesktopCanvas()
             .aspectRatio(aspect, contentMode: .fit)
@@ -123,7 +123,7 @@ private struct DesktopCanvas: View {
     }
 
     private var placeholder: String {
-        let s = app.vnc.state
+        let s = app.liveState
         if s.status == .connecting { return "Connecting…" }
         let parts = [s.detail.isEmpty ? nil : s.detail, snapshotError.map { "Snapshot: \($0)" }].compactMap { $0 }
         return parts.isEmpty ? "Office desktop is not connected" : parts.joined(separator: "\n")
@@ -163,7 +163,7 @@ private struct StatusChip: View {
     @Environment(AppState.self) private var app
 
     var body: some View {
-        let s = app.vnc.state
+        let s = app.liveState
         let (color, label): (Color, String) = switch s.status {
         case .connected: (.green, s.control ? "Controlling" : "Live")
         case .connecting: (.orange, "Connecting")

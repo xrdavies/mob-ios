@@ -265,6 +265,9 @@ final class AppState: MachineEvents {
     /// The live desktop goes over WebRTC when mobd has the `stream` feature; VNC otherwise.
     var streaming: Bool { health?.supports("stream") == true }
 
+    /// The state of whichever session carries the live desktop (status, size, control).
+    var liveState: VncState { streaming ? stream.state : vnc.state }
+
     func setLiveQuality(_ id: String, _ quality: LiveQuality) {
         guard let i = machines.firstIndex(where: { $0.id == id }) else { return }
         machines[i].liveQuality = quality.rawValue
