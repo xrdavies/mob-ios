@@ -65,7 +65,7 @@ struct SettingsView: View {
                 }
                 Section("About") {
                     LabeledContent("mob-ios", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")
-                    Text("MIT License").foregroundStyle(.secondary)
+                    NavigationLink("Acknowledgements") { AcknowledgementsView() }
                 }
             }
             .navigationTitle("Settings")
