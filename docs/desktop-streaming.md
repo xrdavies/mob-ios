@@ -31,7 +31,7 @@ check size, bitcode/arch, and license notices.
 | I3 | **Done.** Tap = click, long-press = right-click, one-finger drag, two-finger scroll; keys bar with latched modifiers and the phone keyboard (web key codes, Unicode text); points normalized inside the letterbox; held input released on View and in the background | `LiveStreamTests` pointer moves; clicks and typing by hand on a phone |
 | I4 | **Done.** Auto / High / Low in the live view (gauge menu) and Settings, reconnecting with control kept; `resize` with mobd's `streamResize`; readout (size, fps, kB/s, transport, network) with signal bars | `LiveStreamTests`; throttled link still to do |
 | I5 | **Done.** `Stream/WsPlayer.swift`: when WebRTC has not connected after 5 s (or fails sooner), the same session continues on `/stream/ws` with the Bearer header; Annex B access units become AVCC samples with a format description from the keyframe's SPS/PPS, shown by `AVSampleBufferDisplayLayer` (VideoToolbox), each frame acked; input, control and `resize` as text. Machines that needed it remember `liveWebSocket`: next time WebRTC gets 1 s, then the WebSocket races beside it; the first frame decides, as mobd does | `WebSocketVideoTests`, `LiveStreamTests` (4 cases); Funnel still to do |
-| I6 | Remove VNC/RFB/ARD code, `VncTests`, Desktop sign-in | build |
+| I6 | **Done.** `VNC/` (RFB, ARD sign-in, VNC auth, framebuffer), `VncTests`, the `/vnc` request and Desktop sign-in removed; `VncState` became `LiveState`. The live view waits for `/health` and shows "Update mobd" when mobd lacks `stream`. Saved machines drop `vncUsername`, and the Keychain `<id>.vncPassword` items are deleted once. Also fixed: a 401 on opening the live view now marks the machine for pairing, the phone keyboard typed into the VNC session instead of the stream, `liveWebSocket` was never saved, and the Settings quality picker did nothing (it now applies at once) | 35 unit tests; `LiveStreamTests` |
 | I7 | Tests: signaling, message encoding, transport choice, migration | `xcodebuild … -only-testing:mob-iosTests test` |
 
 Unblocked: the desktop app confirmed the protocol (D2) and built steps 3–5. I5 uses the WebSocket
@@ -70,7 +70,8 @@ ICE candidates both ways. Each case also checks pointer moves (via mobd's `curso
 | blocked | no | WebSocket after the 5 s head start, 960×540 | 5.3 s |
 | blocked | yes | WebSocket, racing after 1 s | 1.3–1.4 s |
 
-The remembered/blocked case failed once in a first run (WebSocket reported lost before any frame,
-while mobd had chosen it) and passed in the next four; the close code is now logged. Not yet: the real
+The remembered/blocked case failed twice in seven full runs: mobd ended those sessions because the
+office Mac's screen had locked ("stream ended: screen unavailable"), not a client fault; alone, with the
+screen awake, it passed every time. Not yet: the real
 Funnel path, and a phone off Wi-Fi.
 

@@ -74,20 +74,6 @@ final class APIClient {
 
     func artifactURL(_ id: String) -> URL { url("artifacts/\(id)") }
 
-    /// mobd's VNC relay: ws://host:port/vnc (wss for https).
-    var vncURL: URL {
-        var c = URLComponents(url: url("vnc"), resolvingAgainstBaseURL: false)!
-        c.scheme = c.scheme == "https" ? "wss" : "ws"
-        return c.url!
-    }
-
-    /// The /vnc WebSocket handshake; native clients authorize with the header, not a ticket.
-    var vncRequest: URLRequest {
-        var req = request(vncURL)
-        req.setValue("binary", forHTTPHeaderField: "Sec-WebSocket-Protocol")
-        return req
-    }
-
     /// Every request to mobd starts here, so each one carries the token.
     func request(_ url: URL, method: String = "GET") -> URLRequest {
         var req = URLRequest(url: url)

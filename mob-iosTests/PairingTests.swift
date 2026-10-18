@@ -63,10 +63,9 @@ final class PairingTests: XCTestCase {
         let c = APIClient(baseURL: "http://10.0.0.2:8080", token: "T0K")
         XCTAssertEqual(c.request(c.url("health")).value(forHTTPHeaderField: "Authorization"), "Bearer T0K")
         XCTAssertEqual(c.request(c.url("uploads"), method: "POST").httpMethod, "POST")
-        let vnc = c.vncRequest
-        XCTAssertEqual(vnc.url?.absoluteString, "ws://10.0.0.2:8080/vnc")
-        XCTAssertEqual(vnc.value(forHTTPHeaderField: "Authorization"), "Bearer T0K")
-        XCTAssertEqual(vnc.value(forHTTPHeaderField: "Sec-WebSocket-Protocol"), "binary")
+        let ws = c.streamSocketRequest(session: "S1")
+        XCTAssertEqual(ws.url?.absoluteString, "ws://10.0.0.2:8080/stream/ws?session=S1")
+        XCTAssertEqual(ws.value(forHTTPHeaderField: "Authorization"), "Bearer T0K")
         let none = APIClient(baseURL: "http://10.0.0.2:8080", token: nil)
         XCTAssertNil(none.request(none.url("health")).value(forHTTPHeaderField: "Authorization"))
     }
@@ -92,19 +91,24 @@ final class PairingTests: XCTestCase {
         XCTAssertNil(Keychain.get(account))
     }
 
-    func testOldMachineJSONDecodes() throws {
+    func testOldMachineJSONDecodesWithoutDesktopSignIn() throws {
         let old = #"[{"id":"m1","name":"Office","mobdUrl":"http://10.0.0.2:8080","vncUsername":"me","vncPassword":"pw"},{"id":"m2","name":"B","mobdUrl":"b"}]"#
-        let data = Data(old.utf8)
-        let list = try JSONDecoder().decode([Machine].self, from: data)
+        let list = try JSONDecoder().decode([Machine].self, from: Data(old.utf8))
         XCTAssertEqual(list.map(\.id), ["m1", "m2"])
-        XCTAssertEqual(list[0].vncUsername, "me")
-        XCTAssertEqual(list[1].vncUsername, "")
         XCTAssertTrue(list.allSatisfy { $0.needsPairing && $0.serverId == nil })
-        XCTAssertEqual(Machine.legacyPasswords(data), ["m1": "pw"])
-        // The password is not written back.
+        // VNC is gone: neither the sign-in user nor the password is written back.
         let saved = String(decoding: try JSONEncoder().encode(list), as: UTF8.self)
-        XCTAssertFalse(saved.contains("vncPassword"))
+        XCTAssertFalse(saved.contains("vnc"))
         XCTAssertFalse(saved.contains("pw"))
+    }
+
+    func testLiveViewSettingsRoundTrip() throws {
+        var m = Machine(id: "m", name: "Office", mobdUrl: "https://o.example")
+        m.liveQuality = "low"
+        m.liveWebSocket = true
+        let back = try JSONDecoder().decode(Machine.self, from: JSONEncoder().encode(m))
+        XCTAssertEqual(back.liveQuality, "low")
+        XCTAssertEqual(back.liveWebSocket, true)
     }
 
     func testPairedMachineRoundTrip() throws {
@@ -114,6 +118,5 @@ final class PairingTests: XCTestCase {
         let back = try JSONDecoder().decode(Machine.self, from: JSONEncoder().encode(m))
         XCTAssertEqual(back, m)
         XCTAssertFalse(back.needsPairing)
-        XCTAssertEqual(Machine.legacyPasswords(try JSONEncoder().encode([m])), [:])
     }
 }

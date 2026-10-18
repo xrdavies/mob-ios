@@ -11,7 +11,6 @@ struct Check: Codable, Hashable {
 private let checkLabels = [
     "accessibility": "Accessibility",
     "screenRecording": "Screen Recording",
-    "vnc": "Screen Sharing",
     "actuation": "Desktop control",
     "codex": "Codex",
     "claude": "Claude Code",
@@ -263,8 +262,6 @@ struct Machine: Codable, Identifiable, Hashable {
     var id: String
     var name: String
     var mobdUrl: String
-    /// macOS user for Screen Sharing sign-in (ARD), so the live view lands in that user's session.
-    var vncUsername: String = ""
     var liveQuality: String?
     /// The live view last needed mobd's WebSocket here (no UDP path): try it sooner next time.
     var liveWebSocket: Bool?
@@ -275,13 +272,11 @@ struct Machine: Codable, Identifiable, Hashable {
     var needsPairing = false
 
     var tokenAccount: String { "\(id).token" }
-    var vncPasswordAccount: String { "\(id).vncPassword" }
     var token: String? { Keychain.get(tokenAccount) }
-    var vncPassword: String { Keychain.get(vncPasswordAccount) ?? "" }
 }
 
 extension Machine {
-    private enum Keys: String, CodingKey { case id, name, mobdUrl, vncUsername, liveQuality, serverId, clientId, needsPairing }
+    private enum Keys: String, CodingKey { case id, name, mobdUrl, liveQuality, liveWebSocket, serverId, clientId, needsPairing }
 
     /// Older saves have no pairing fields: such machines need pairing.
     init(from decoder: Decoder) throws {
@@ -289,8 +284,8 @@ extension Machine {
         id = try c.decode(String.self, forKey: .id)
         name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
         mobdUrl = try c.decodeIfPresent(String.self, forKey: .mobdUrl) ?? ""
-        vncUsername = try c.decodeIfPresent(String.self, forKey: .vncUsername) ?? ""
         liveQuality = try c.decodeIfPresent(String.self, forKey: .liveQuality)
+        liveWebSocket = try c.decodeIfPresent(Bool.self, forKey: .liveWebSocket)
         serverId = try c.decodeIfPresent(String.self, forKey: .serverId)
         clientId = try c.decodeIfPresent(String.self, forKey: .clientId)
         needsPairing = try c.decodeIfPresent(Bool.self, forKey: .needsPairing) ?? (serverId == nil)
@@ -301,17 +296,10 @@ extension Machine {
         try c.encode(id, forKey: .id)
         try c.encode(name, forKey: .name)
         try c.encode(mobdUrl, forKey: .mobdUrl)
-        try c.encode(vncUsername, forKey: .vncUsername)
         try c.encodeIfPresent(liveQuality, forKey: .liveQuality)
+        try c.encodeIfPresent(liveWebSocket, forKey: .liveWebSocket)
         try c.encodeIfPresent(serverId, forKey: .serverId)
         try c.encodeIfPresent(clientId, forKey: .clientId)
         try c.encode(needsPairing, forKey: .needsPairing)
-    }
-
-    /// Desktop passwords that older versions saved in the machines JSON, by machine ID.
-    static func legacyPasswords(_ data: Data) -> [String: String] {
-        struct Old: Decodable { let id: String; let vncPassword: String? }
-        let list = (try? JSONDecoder().decode([Old].self, from: data)) ?? []
-        return Dictionary(list.compactMap { o in o.vncPassword.flatMap { $0.isEmpty ? nil : (o.id, $0) } }, uniquingKeysWith: { a, _ in a })
     }
 }

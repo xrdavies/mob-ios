@@ -38,7 +38,8 @@ final class LiveStreamTests: XCTestCase {
         let started = Date()
         s.connect(client: APIClient(baseURL: url, token: token), maxWidth: 1280, maxHeight: 832, quality: .auto, preferWebSocket: remembered)
         try await wait("first picture", 15) { s.state.status != .connecting }
-        if s.state.status != .connected { print(Log.shared.text) } // why it did not start
+        // Why it did not start; TEST_RUNNER_PRINT_LOG=1 prints it always.
+        if s.state.status != .connected || ProcessInfo.processInfo.environment["PRINT_LOG"] != nil { print(Log.shared.text) }
         XCTAssertEqual(s.state.status, .connected, s.state.detail)
         XCTAssertEqual(s.transport, expect)
         let first = Date().timeIntervalSince(started)

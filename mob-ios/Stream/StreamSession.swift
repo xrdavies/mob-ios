@@ -16,12 +16,11 @@ enum LiveTransport: String {
 /// `pointer` (unreliable, latest wins) for Control mode. Where UDP cannot pass, the same session
 /// continues over mobd's WebSocket (WsPlayer): WebRTC gets a head start, then the WebSocket replaces
 /// it, or races beside it where it was needed last time; mobd sends video on the first transport to
-/// connect, so the first frame says which one won. Shared by the thumbnail and the full-screen view
-/// like VncSession; mobd builds without the `stream` feature keep VncSession.
+/// connect, so the first frame says which one won. Shared by the thumbnail and the full-screen view.
 @MainActor @Observable
 final class StreamSession {
-    /// Status, size and control, in the same shape as the VNC view's.
-    private(set) var state = VncState()
+    /// Status, size and control.
+    private(set) var state = LiveState()
     /// The received video, for the renderers of the views on screen.
     private(set) var track: RTCVideoTrack?
     /// mobd's encoder target and reported loss.
@@ -93,7 +92,7 @@ final class StreamSession {
         started = Date()
         frames = 0
         size = (maxWidth, maxHeight)
-        state = VncState(status: .connecting, detail: "Connecting…")
+        state = LiveState(status: .connecting, detail: "Connecting…")
         Log.add("live view: connecting over WebRTC (\(maxWidth)×\(maxHeight), \(quality.rawValue))")
         Task { await run(a, client: client, maxWidth: maxWidth, maxHeight: maxHeight, quality: quality, preferWebSocket: preferWebSocket) }
         Task { [weak self] in
@@ -202,7 +201,7 @@ final class StreamSession {
                     if self.pc == nil { self.fail(a, "The office Mac could not be reached over WebRTC or the WebSocket fallback") }
                 } else if code == URLSessionWebSocketTask.CloseCode.normalClosure.rawValue {
                     self.teardown()
-                    self.state = VncState(status: .idle, detail: "Disconnected")
+                    self.state = LiveState(status: .idle, detail: "Disconnected")
                 } else {
                     self.fail(a, "The live view connection was lost")
                 }
@@ -258,7 +257,7 @@ final class StreamSession {
         frames += 1
         if state.status == .connecting {
             Log.add("live view: first picture over \(via?.rawValue ?? "?") after \(ms()) ms, \(width)×\(height)")
-            state = VncState(status: .connected, width: width, height: height)
+            state = LiveState(status: .connected, width: width, height: height)
             if via == .webSocket { watchWsStats(a) } else { watchStats(a) }
             if takeControl { setControl(true) }
         } else if width != state.width || height != state.height {
@@ -278,7 +277,7 @@ final class StreamSession {
             else { fail(a, "The office Mac could not be reached over WebRTC") }
         case .closed where state.status == .connected && via == .webRTC:
             teardown()
-            state = VncState(status: .idle, detail: "Disconnected")
+            state = LiveState(status: .idle, detail: "Disconnected")
         default: break
         }
     }
@@ -341,7 +340,7 @@ final class StreamSession {
         attempt += 1 // later events from this connection are ignored
         Log.error("live view: \(message)")
         teardown()
-        state = VncState(status: .error, detail: message)
+        state = LiveState(status: .error, detail: message)
     }
 
     private func teardown() {
@@ -366,10 +365,16 @@ final class StreamSession {
         modifiers = []
     }
 
+    /// The live view cannot start here (mobd without the `stream` feature); says why.
+    func unavailable(_ message: String) {
+        disconnect()
+        state = LiveState(status: .error, detail: message)
+    }
+
     func disconnect() {
         attempt += 1
         teardown()
-        if state.status != .idle { state = VncState(status: .idle, detail: "Disconnected") }
+        if state.status != .idle { state = LiveState(status: .idle, detail: "Disconnected") }
     }
 
     /// Refits the running session to a new view (mobd with `streamResize`); false if not sent.

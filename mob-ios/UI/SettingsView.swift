@@ -25,7 +25,7 @@ struct SettingsView: View {
                                         .foregroundStyle(m.id == app.activeMachineId ? Color.accentColor : .secondary)
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(m.name).foregroundStyle(.primary)
-                                        Text(m.mobdUrl + (m.vncUsername.isEmpty ? "" : " · sign-in as \(m.vncUsername)"))
+                                        Text(m.mobdUrl)
                                             .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                                         if m.needsPairing {
                                             Label("Needs pairing", systemImage: "exclamationmark.triangle.fill")
@@ -70,7 +70,7 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .sheet(item: $editing) { m in
-                MachineEditor(initial: m) { app.save($0, vncPassword: $1) }
+                MachineEditor(initial: m) { app.save($0) }
             }
             .sheet(item: $pairing) { PairingSheet(existing: $0.machine) }
             .confirmationDialog("Remove \(deleting?.name ?? "")?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), titleVisibility: .visible) {
@@ -125,17 +125,16 @@ struct PairRequest: Identifiable {
     let machine: Machine?
 }
 
-/// Name and desktop sign-in of a paired machine; its address comes from pairing.
+/// Name and live view quality of a paired machine; its address comes from pairing.
 private struct MachineEditor: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppState.self) private var app
     @State var machine: Machine
-    @State private var password: String
     @State private var quality: LiveQuality = .auto
-    let onSave: (Machine, String) -> Void
+    let onSave: (Machine) -> Void
 
-    init(initial: Machine, onSave: @escaping (Machine, String) -> Void) {
+    init(initial: Machine, onSave: @escaping (Machine) -> Void) {
         _machine = State(initialValue: initial)
-        _password = State(initialValue: initial.vncPassword)
         _quality = State(initialValue: LiveQuality(rawValue: initial.liveQuality ?? "") ?? .auto)
         self.onSave = onSave
     }
@@ -150,15 +149,6 @@ private struct MachineEditor: View {
                     Text("The address comes from the pairing link. If the office Mac moved, use Pair again with a new link.")
                 }
                 Section {
-                    TextField("Mac user name", text: $machine.vncUsername)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    SecureField("Mac or VNC password", text: $password)
-                } header: {
-                    Text("Desktop sign-in (optional)")
-                } footer: {
-                    Text("With a user name the live view signs in as that user, like Screen Sharing.app. A Screen Sharing (VNC) password alone, with no user name, opens the login window. Stored in this phone's Keychain only; without either the desktop shows snapshots.")
-                }
-                Section {
                     Picker("Quality", selection: $quality) {
                         ForEach(LiveQuality.allCases) { q in
                             Text(q.label).tag(q)
@@ -167,12 +157,11 @@ private struct MachineEditor: View {
                 } header: {
                     Text("Live desktop quality")
                 } footer: {
-                    Text(quality.hint)
+                    Text("\(quality.hint). Applies at once; an open live view reconnects.")
                 }
             }
-            .onChange(of: quality) { _, new in
-                machine.liveQuality = new.rawValue
-            }
+            // Like the desktop app: the quality applies at once (Save only renames).
+            .onChange(of: quality) { _, new in app.setLiveQuality(machine.id, new) }
             .navigationTitle("Edit machine")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -181,8 +170,7 @@ private struct MachineEditor: View {
                     Button("Save") {
                         var m = machine
                         m.name = m.name.trimmingCharacters(in: .whitespaces).isEmpty ? "Office Mac" : m.name.trimmingCharacters(in: .whitespaces)
-                        m.vncUsername = m.vncUsername.trimmingCharacters(in: .whitespaces)
-                        onSave(m, password)
+                        onSave(m)
                         dismiss()
                     }
                 }

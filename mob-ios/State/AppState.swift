@@ -42,7 +42,6 @@ final class AppState: MachineEvents {
     private(set) var apiClient: APIClient
     let chat = ChatStore()
     /// One live view shared by the thumbnail and the full-screen view.
-    let vnc = VncSession()
     let stream = StreamSession()
     let notifier = Notifier()
 
@@ -59,11 +58,13 @@ final class AppState: MachineEvents {
     init() {
         let data = UserDefaults.standard.data(forKey: "machines")
         var stored = data.flatMap { try? JSONDecoder().decode([Machine].self, from: $0) } ?? []
-        // Older versions kept the desktop password in this JSON: move it to the Keychain, and only
-        // rewrite the JSON once every password is there (otherwise try again next launch).
-        let legacy = data.map(Machine.legacyPasswords) ?? [:]
-        let moved = legacy.allSatisfy { Keychain.set($0.value, for: "\($0.key).vncPassword") }
-        var changed = !legacy.isEmpty
+        // VNC is gone: older versions kept a Desktop sign-in password, in this JSON or the Keychain.
+        // Rewriting the JSON drops it there; the Keychain copies are deleted once.
+        var changed = data.map { String(decoding: $0, as: UTF8.self).contains("\"vnc") } ?? false
+        if !UserDefaults.standard.bool(forKey: "vncRemoved") {
+            for m in stored { Keychain.delete("\(m.id).vncPassword") }
+            UserDefaults.standard.set(true, forKey: "vncRemoved")
+        }
         // Machines from before pairing, or whose token is gone, need pairing.
         for i in stored.indices where !stored[i].needsPairing && stored[i].token == nil {
             stored[i].needsPairing = true
@@ -74,9 +75,9 @@ final class AppState: MachineEvents {
         activeMachineId = stored.contains { $0.id == saved } ? saved : stored.first?.id
         turnPrefs = (UserDefaults.standard.dictionary(forKey: "turnPrefs") as? [String: String]) ?? [:]
         apiClient = APIClient(baseURL: "", token: nil)
-        if changed && moved { saveMachines() }
+        if changed { saveMachines() }
         chat.onUnauthorized = { [weak self] id in self?.markNeedsPairing(id) }
-        vnc.onUnauthorized = { [weak self] in if let id = self?.activeMachineId { self?.markNeedsPairing(id) } }
+        stream.onUnauthorized = { [weak self] in if let id = self?.activeMachineId { self?.markNeedsPairing(id) } }
         notifier.onOpen = { [weak self] m, s in self?.openChat(machine: m, session: s) }
         notifier.onAnswer = { [weak self] m, task, question, answer, approved in
             await self?.answerFromNotification(machine: m, task: task, question: question, answer: answer, approved: approved)
@@ -111,7 +112,7 @@ final class AppState: MachineEvents {
                 try? await Task.sleep(for: .seconds(30))
             }
         }
-        if desktopUsers > 0 { connectDesktop() } else { vnc.disconnect() }
+        if desktopUsers > 0 { connectDesktop() } else { stream.disconnect() }
     }
 
     func selectMachine(_ id: String) {
@@ -120,12 +121,10 @@ final class AppState: MachineEvents {
         activate()
     }
 
-    /// Saves the name and desktop sign-in from the editor; address and pairing stay as stored.
-    func save(_ m: Machine, vncPassword: String) {
+    /// Saves the name from the editor; address and pairing stay as stored.
+    func save(_ m: Machine) {
         guard var stored = machines.first(where: { $0.id == m.id }) else { return }
         stored.name = m.name
-        stored.vncUsername = m.vncUsername
-        Keychain.set(vncPassword, for: stored.vncPasswordAccount)
         store(stored)
     }
 
@@ -174,7 +173,6 @@ final class AppState: MachineEvents {
         machines.removeAll { $0.id == m.id }
         saveMachines()
         Keychain.delete(m.tokenAccount)
-        Keychain.delete(m.vncPasswordAccount)
         waiting[m.id] = nil
         defaults.removeObject(forKey: "session.\(m.id)")
         if m.id == activeMachineId {
@@ -203,9 +201,12 @@ final class AppState: MachineEvents {
             let h = try await client.health()
             guard client === apiClient else { return }
             if !isConnected { Log.add("\(activeMachine?.name ?? ""): connected, runners \((h.runners ?? []).map(\.name).joined(separator: ", "))") }
+            let first = health == nil
             health = h
             isConnected = h.ok
             healthError = nil
+            // The live view waits for health to know whether mobd streams.
+            if first, desktopUsers > 0, stream.state.status == .idle || stream.state.status == .error { connectDesktop() }
         } catch {
             guard client === apiClient, !(error is CancellationError) else { return }
             if error.isUnauthorized { return markNeedsPairing(m.id) }
@@ -231,33 +232,22 @@ final class AppState: MachineEvents {
 
     func releaseDesktop() {
         desktopUsers -= 1
-        if desktopUsers == 0 {
-            vnc.disconnect()
-            stream.disconnect()
-        }
+        if desktopUsers == 0 { stream.disconnect() }
     }
 
     /// `control` takes control once the new picture arrives (a quality change keeps it).
     func connectDesktop(control: Bool = false) {
-        guard let m = activeMachine, !m.needsPairing else {
-            vnc.disconnect()
-            stream.disconnect()
-            return
-        }
-        if streaming {
-            vnc.disconnect()
-            let quality = LiveQuality(rawValue: m.liveQuality ?? "") ?? .auto
-            let w = Int(UIScreen.main.bounds.width * UIScreen.main.scale)
-            let h = Int(UIScreen.main.bounds.height * UIScreen.main.scale)
-            // Remember which transport carried the picture, so the next connect races the WebSocket sooner.
-            let id = m.id
-            stream.onTransport = { [weak self] t in self?.rememberTransport(id, t) }
-            stream.connect(client: apiClient, maxWidth: devicePixels(CGFloat(w), scale: 1), maxHeight: devicePixels(CGFloat(h), scale: 1),
-                           quality: quality, control: control, preferWebSocket: m.liveWebSocket == true)
-        } else {
-            stream.disconnect()
-            vnc.connect(request: apiClient.vncRequest, username: m.vncUsername, password: m.vncPassword)
-        }
+        guard let m = activeMachine, !m.needsPairing else { return stream.disconnect() }
+        guard let health else { return } // connects when health arrives
+        if !health.supports("stream") { return stream.unavailable("Update mobd on the office Mac to use the live desktop") }
+        let quality = LiveQuality(rawValue: m.liveQuality ?? "") ?? .auto
+        let w = Int(UIScreen.main.bounds.width * UIScreen.main.scale)
+        let h = Int(UIScreen.main.bounds.height * UIScreen.main.scale)
+        // Remember which transport carried the picture, so the next connect races the WebSocket sooner.
+        let id = m.id
+        stream.onTransport = { [weak self] t in self?.rememberTransport(id, t) }
+        stream.connect(client: apiClient, maxWidth: devicePixels(CGFloat(w), scale: 1), maxHeight: devicePixels(CGFloat(h), scale: 1),
+                       quality: quality, control: control, preferWebSocket: m.liveWebSocket == true)
     }
 
     private func rememberTransport(_ id: String, _ t: LiveTransport) {
@@ -269,23 +259,19 @@ final class AppState: MachineEvents {
     }
 
     func closeLiveView() {
-        vnc.setControl(false)
         stream.setControl(false)
         showLiveView = false
     }
 
-    /// The live desktop goes over WebRTC when mobd has the `stream` feature; VNC otherwise.
-    var streaming: Bool { health?.supports("stream") == true }
-
-    /// The state of whichever session carries the live desktop (status, size, control).
-    var liveState: VncState { streaming ? stream.state : vnc.state }
+    /// The live view's status, size and control.
+    var liveState: LiveState { stream.state }
 
     func setLiveQuality(_ id: String, _ quality: LiveQuality) {
         guard let i = machines.firstIndex(where: { $0.id == id }) else { return }
         machines[i].liveQuality = quality.rawValue
         saveMachines()
         // mobd fixes the profile per session: reconnect an open view, keeping control if it was on.
-        if id == activeMachineId, desktopUsers > 0 { connectDesktop(control: streaming && stream.state.control) }
+        if id == activeMachineId, desktopUsers > 0 { connectDesktop(control: stream.state.control) }
     }
 
     // MARK: - Events and notifications

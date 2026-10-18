@@ -1,8 +1,7 @@
 import Foundation
 import Security
 
-/// Secrets kept in the iOS Keychain as generic passwords: device tokens ("<machine>.token")
-/// and desktop sign-in passwords ("<machine>.vncPassword").
+/// Secrets kept in the iOS Keychain as generic passwords: device tokens ("<machine>.token").
 enum Keychain {
     static let service = "com.xrdavies.mob-ios"
 
