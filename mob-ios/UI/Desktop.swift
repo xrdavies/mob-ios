@@ -31,7 +31,7 @@ struct DesktopThumbnail: View {
     var body: some View {
         let s = app.vnc.state
         let aspect = s.width > 0 && s.height > 0 ? CGFloat(s.width) / CGFloat(s.height) : 16 / 10
-        DesktopCanvas(snapshotWidth: 960)
+        DesktopCanvas()
             .aspectRatio(aspect, contentMode: .fit)
             .frame(maxHeight: maxHeight)
             .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -54,8 +54,11 @@ struct DesktopThumbnail: View {
 /// Live frames when the VNC session is up, otherwise /screen snapshots every 2 s.
 private struct DesktopCanvas: View {
     @Environment(AppState.self) private var app
-    let snapshotWidth: Int
+    @Environment(\.displayScale) private var displayScale
+    /// The view's width in points; snapshots are fetched at that width in pixels.
+    @State private var width: CGFloat = 0
     @State private var snapshot: UIImage?
+    @State private var snapshotTag: String?
     @State private var snapshotError: String?
     @State private var snapshotAt: Date?
 
@@ -80,11 +83,17 @@ private struct DesktopCanvas: View {
             }
         }
         .overlay(alignment: .bottomLeading) { if !live { snapshotLabel } }
-        .task(id: [live, app.activeMachine?.needsPairing == true]) {
-            guard !live, app.activeMachine?.needsPairing != true else { return }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        .task(id: "\(live) \(app.activeMachine?.needsPairing == true) \(devicePixels(width, scale: displayScale))") {
+            let pixels = devicePixels(width, scale: displayScale)
+            guard !live, width > 0, app.activeMachine?.needsPairing != true else { return }
             while !Task.isCancelled {
                 do {
-                    snapshot = try await app.apiClient.screen(maxWidth: snapshotWidth)
+                    // A size change starts a new task and a new download; otherwise unchanged costs a 304.
+                    if let fresh = try await app.apiClient.screen(maxWidth: pixels, etag: snapshot == nil ? nil : snapshotTag) {
+                        snapshot = fresh.image
+                        snapshotTag = fresh.etag
+                    }
                     snapshotAt = Date()
                     snapshotError = nil
                 } catch {
@@ -96,12 +105,12 @@ private struct DesktopCanvas: View {
         }
     }
 
-    /// "Snapshot · 17:33:05", or why snapshots fail (usually Screen Recording on the office Mac).
+    /// "Snapshot · 17:33:05", or mobd's reason snapshots fail (locked, asleep, no Screen Recording).
     @ViewBuilder private var snapshotLabel: some View {
         let time = snapshot == nil ? nil : snapshotAt?.formatted(date: .omitted, time: .standard)
         let text: String? = switch (snapshotError, time) {
         case (.some, .some(let t)): "Snapshot · \(t) · not updating"
-        case (.some, nil): "Snapshot unavailable. Check Screen Recording on the office Mac."
+        case (.some(let e), nil): "Snapshot unavailable: \(e.replacingOccurrences(of: "screen unavailable: ", with: ""))"
         case (nil, .some(let t)): "Snapshot · \(t)"
         default: nil
         }
@@ -169,6 +178,42 @@ private struct StatusChip: View {
     }
 }
 
+/// Live view quality for the active machine; picking one reconnects an open view (mobd fixes it per session).
+private struct QualityMenu: View {
+    @Environment(AppState.self) private var app
+
+    var body: some View {
+        let value = LiveQuality(rawValue: app.activeMachine?.liveQuality ?? "") ?? .auto
+        Menu {
+            Picker("Live view quality", selection: Binding(get: { value }, set: { q in
+                if let id = app.activeMachine?.id { app.setLiveQuality(id, q) }
+            })) {
+                ForEach(LiveQuality.allCases) { q in
+                    Button { } label: { Text(q.label); Text(q.hint) }.tag(q)
+                }
+            }
+        } label: {
+            Label(value.label, systemImage: "gauge.with.dots.needle.33percent").font(.subheadline)
+        }
+        .accessibilityLabel("Live view quality: \(value.label)")
+    }
+}
+
+/// Connection quality as three bars, coloured when it degrades.
+private struct SignalBars: View {
+    let bars: Int
+
+    var body: some View {
+        let on: Color = bars >= 3 ? .green : bars == 2 ? .yellow : .red
+        HStack(alignment: .bottom, spacing: 1.5) {
+            ForEach(1...3, id: \.self) { i in
+                RoundedRectangle(cornerRadius: 1).fill(i <= bars ? on : .white.opacity(0.2)).frame(width: 3, height: CGFloat(i * 4))
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
 /// Full-screen live view with the View / Control switch.
 struct LiveView: View {
     @Environment(AppState.self) private var app
@@ -190,6 +235,7 @@ struct LiveView: View {
                     .accessibilityLabel("Close")
                 StatusChip()
                 Spacer()
+                if streaming { QualityMenu() }
                 if live {
                     Picker("Mode", selection: Binding(get: { s.control }, set: {
                         if streaming { stream.setControl($0) } else { vnc.setControl($0) }
@@ -207,7 +253,7 @@ struct LiveView: View {
 
             GeometryReader { geo in
                 ZStack {
-                    DesktopCanvas(snapshotWidth: 1600)
+                    DesktopCanvas()
                         .scaleEffect(scale)
                         .offset(offset)
                     if s.control, let mark { marker(mark, in: geo.size, fw: s.width, fh: s.height) }
@@ -217,6 +263,15 @@ struct LiveView: View {
             }
 
             if s.control { KeysBar(typing: $typing) }
+            if streaming, live {
+                // What arrives, once a second: signal bars from mobd's loss and the measured round trip.
+                HStack(spacing: 6) {
+                    SignalBars(bars: signalBars(loss: stream.loss, rttMs: stream.readout?.rttMs))
+                    Text(readoutText(width: s.width, height: s.height, stream.readout)).monospacedDigit()
+                }
+                .font(.caption).foregroundStyle(.white.opacity(0.7))
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 10).padding(.top, 8)
+            }
             Text(footer(s, live: live))
                 .font(.caption).foregroundStyle(.white.opacity(0.6))
                 .frame(maxWidth: .infinity, alignment: .leading).padding(10)

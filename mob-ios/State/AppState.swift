@@ -237,7 +237,8 @@ final class AppState: MachineEvents {
         }
     }
 
-    func connectDesktop() {
+    /// `control` takes control once the new picture arrives (a quality change keeps it).
+    func connectDesktop(control: Bool = false) {
         guard let m = activeMachine, !m.needsPairing else {
             vnc.disconnect()
             stream.disconnect()
@@ -248,7 +249,7 @@ final class AppState: MachineEvents {
             let quality = LiveQuality(rawValue: m.liveQuality ?? "") ?? .auto
             let w = Int(UIScreen.main.bounds.width * UIScreen.main.scale)
             let h = Int(UIScreen.main.bounds.height * UIScreen.main.scale)
-            stream.connect(client: apiClient, maxWidth: devicePixels(CGFloat(w), scale: 1), maxHeight: devicePixels(CGFloat(h), scale: 1), quality: quality)
+            stream.connect(client: apiClient, maxWidth: devicePixels(CGFloat(w), scale: 1), maxHeight: devicePixels(CGFloat(h), scale: 1), quality: quality, control: control)
         } else {
             stream.disconnect()
             vnc.connect(request: apiClient.vncRequest, username: m.vncUsername, password: m.vncPassword)
@@ -268,7 +269,8 @@ final class AppState: MachineEvents {
         guard let i = machines.firstIndex(where: { $0.id == id }) else { return }
         machines[i].liveQuality = quality.rawValue
         saveMachines()
-        if id == activeMachineId, desktopUsers > 0 { connectDesktop() }
+        // mobd fixes the profile per session: reconnect an open view, keeping control if it was on.
+        if id == activeMachineId, desktopUsers > 0 { connectDesktop(control: streaming && stream.state.control) }
     }
 
     // MARK: - Events and notifications

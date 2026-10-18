@@ -195,11 +195,18 @@ final class APIClient {
         _ = try await send("POST", "tasks/\(task)/questions/\(question)/answer", body: body)
     }
 
-    /// A desktop snapshot from GET /screen.
-    func screen(maxWidth: Int) async throws -> UIImage {
-        let data = try await send("GET", "screen", query: ["maxWidth": String(maxWidth), "quality": "70"])
+    /// A desktop snapshot from GET /screen; nil when the screen is unchanged since `etag` (304), so
+    /// polling an idle desktop downloads nothing.
+    func screen(maxWidth: Int, etag: String?) async throws -> (image: UIImage, etag: String?)? {
+        var req = request(url("screen", ["maxWidth": String(maxWidth), "quality": "65"]))
+        req.cachePolicy = .reloadIgnoringLocalCacheData
+        if let etag { req.setValue(etag, forHTTPHeaderField: "If-None-Match") }
+        let (data, response) = try await session.data(for: req)
+        let http = response as? HTTPURLResponse
+        if http?.statusCode == 304 { return nil }
+        try check(data, response)
         guard let image = UIImage(data: data) else { throw APIError(message: "Not an image", status: nil) }
-        return image
+        return (image, http?.value(forHTTPHeaderField: "ETag"))
     }
 
     func image(_ url: URL) async throws -> UIImage {

@@ -26,10 +26,10 @@ check size, bitcode/arch, and license notices.
 
 | Step | Content | Verified by |
 | --- | --- | --- |
-| I1 | Snapshot size | Simulator |
-| I2 | View-only live view; "Update mobd" when `/health` lacks `stream` | Simulator + phone |
-| I3 | Control over data channels | phone |
-| I4 | Quality setting and readout | throttled link |
+| I1 | **Done.** Snapshot at the view width × screen scale (rounded up to 64 px), quality 65, `If-None-Match` so an unchanged screen costs a 304; the label shows mobd's reason (locked, asleep, no Screen Recording) | `SnapshotSizeTests`; office mobd |
+| I2 | **Done.** `Stream/StreamSession.swift` with stasel/WebRTC 155.0.0 (SPM): recvonly H.264, non-trickle `POST /stream`, `control`/`input`/`pointer` channels, `RTCMTLVideoView`; VNC stays for mobd without `stream`; mobd's `ended`/errors shown | `StreamTests`, `LiveStreamTests` (simulator vs office mobd) |
+| I3 | **Done.** Tap = click, long-press = right-click, one-finger drag, two-finger scroll; keys bar with latched modifiers and the phone keyboard (web key codes, Unicode text); points normalized inside the letterbox; held input released on View and in the background | `LiveStreamTests` pointer moves; clicks and typing by hand on a phone |
+| I4 | **Done.** Auto / High / Low in the live view (gauge menu) and Settings, reconnecting with control kept; `resize` with mobd's `streamResize`; readout (size, fps, kB/s, transport, network) with signal bars | `LiveStreamTests`; throttled link still to do |
 | I5 | WebSocket fallback (VideoToolbox) | Funnel address |
 | I6 | Remove VNC/RFB/ARD code, `VncTests`, Desktop sign-in | build |
 | I7 | Tests: signaling, message encoding, transport choice, migration | `xcodebuild … -only-testing:mob-iosTests test` |
@@ -41,3 +41,20 @@ I6 happens together with mobd M8 and desktop D6. Order across repos: see mobd's 
 Follow the desktop design where it applies: the inline view only watches and the large view controls,
 with a View/Control switch; quality switched from the view as well as Settings; a readout of size, fps,
 kB/s, transport and network with signal bars; WebRTC gets a 5 s head start before the WebSocket.
+
+### I2–I4 check (2026-10-19)
+
+`LiveStreamTests` in the iPhone 17 Pro simulator (iOS 26.5) against the office mobd (`7a06a64`), with
+a temporary client revoked afterwards. It only moves the office pointer.
+
+| Check | Result |
+| --- | --- |
+| First picture (LAN, WebRTC, VideoToolbox decode in the simulator) | 318–369 ms at 1280×720 |
+| Move while in View | not sent |
+| Control, move to (0.25, 0.25) then (0.75, 0.6) | mobd's `cursor` reports both exactly |
+| `resize` to 640 px | 640×360 without reconnecting |
+| Readout | `640×360 · 1 fps · 62 kB/s · WebRTC · LAN` (idle screen) |
+
+Not yet: the app on a real phone (clicks, typing, gestures by hand), a throttled link, and the
+TestFlight check for camera/microphone purpose-string warnings from the WebRTC binary.
+

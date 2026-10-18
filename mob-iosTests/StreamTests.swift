@@ -169,3 +169,13 @@ final class StreamTests: XCTestCase {
         XCTAssertEqual(signalBars(loss: 0.15, rttMs: 500), 1)
     }
 }
+
+final class SnapshotSizeTests: XCTestCase {
+    func testDevicePixelsRoundUpTo64WithinLimits() {
+        XCTAssertEqual(devicePixels(375, scale: 3), 1152)
+        XCTAssertEqual(devicePixels(320, scale: 2), 640)
+        XCTAssertEqual(devicePixels(0, scale: 3), 64)
+        XCTAssertEqual(devicePixels(400, scale: 0), 448) // unknown scale counts as 1
+        XCTAssertEqual(devicePixels(10000, scale: 2), 8192)
+    }
+}
