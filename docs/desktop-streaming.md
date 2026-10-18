@@ -34,4 +34,10 @@ check size, bitcode/arch, and license notices.
 | I6 | Remove VNC/RFB/ARD code, `VncTests`, Desktop sign-in | build |
 | I7 | Tests: signaling, message encoding, transport choice, migration | `xcodebuild … -only-testing:mob-iosTests test` |
 
-Starts after the desktop app (D2) confirms the protocol. Merges with the other repos at release.
+Unblocked: the desktop app confirmed the protocol (D2) and built steps 3–5. I5 uses the WebSocket
+protocol as revised in mobd M7b (540p start, `resize`, try the WebSocket first where it was needed).
+I6 happens together with mobd M8 and desktop D6. Order across repos: see mobd's plan, "Order".
+
+Follow the desktop design where it applies: the inline view only watches and the large view controls,
+with a View/Control switch; quality switched from the view as well as Settings; a readout of size, fps,
+kB/s, transport and network with signal bars; WebRTC gets a 5 s head start before the WebSocket.
