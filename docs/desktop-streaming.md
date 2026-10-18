@@ -30,7 +30,7 @@ check size, bitcode/arch, and license notices.
 | I2 | **Done.** `Stream/StreamSession.swift` with stasel/WebRTC 155.0.0 (SPM): recvonly H.264, non-trickle `POST /stream`, `control`/`input`/`pointer` channels, `RTCMTLVideoView`; VNC stays for mobd without `stream`; mobd's `ended`/errors shown | `StreamTests`, `LiveStreamTests` (simulator vs office mobd) |
 | I3 | **Done.** Tap = click, long-press = right-click, one-finger drag, two-finger scroll; keys bar with latched modifiers and the phone keyboard (web key codes, Unicode text); points normalized inside the letterbox; held input released on View and in the background | `LiveStreamTests` pointer moves; clicks and typing by hand on a phone |
 | I4 | **Done.** Auto / High / Low in the live view (gauge menu) and Settings, reconnecting with control kept; `resize` with mobd's `streamResize`; readout (size, fps, kB/s, transport, network) with signal bars | `LiveStreamTests`; throttled link still to do |
-| I5 | WebSocket fallback (VideoToolbox) | Funnel address |
+| I5 | **Done.** `Stream/WsPlayer.swift`: when WebRTC has not connected after 5 s (or fails sooner), the same session continues on `/stream/ws` with the Bearer header; Annex B access units become AVCC samples with a format description from the keyframe's SPS/PPS, shown by `AVSampleBufferDisplayLayer` (VideoToolbox), each frame acked; input, control and `resize` as text. Machines that needed it remember `liveWebSocket`: next time WebRTC gets 1 s, then the WebSocket races beside it; the first frame decides, as mobd does | `WebSocketVideoTests`, `LiveStreamTests` (4 cases); Funnel still to do |
 | I6 | Remove VNC/RFB/ARD code, `VncTests`, Desktop sign-in | build |
 | I7 | Tests: signaling, message encoding, transport choice, migration | `xcodebuild … -only-testing:mob-iosTests test` |
 
@@ -57,4 +57,20 @@ a temporary client revoked afterwards. It only moves the office pointer.
 
 Not yet: the app on a real phone (clicks, typing, gestures by hand), a throttled link, and the
 TestFlight check for camera/microphone purpose-string warnings from the WebRTC binary.
+
+### I5 check (2026-10-19)
+
+`LiveStreamTests` against the office mobd (`7a06a64`) in the simulator, two full runs; "blocked" drops
+ICE candidates both ways. Each case also checks pointer moves (via mobd's `cursor`) and `resize`.
+
+| WebRTC | WebSocket remembered | Carried by | First picture |
+| --- | --- | --- | --- |
+| works | no | WebRTC | 0.21–0.41 s |
+| works | yes | WebRTC (returns to it) | 0.35–0.41 s |
+| blocked | no | WebSocket after the 5 s head start, 960×540 | 5.3 s |
+| blocked | yes | WebSocket, racing after 1 s | 1.3–1.4 s |
+
+The remembered/blocked case failed once in a first run (WebSocket reported lost before any frame,
+while mobd had chosen it) and passed in the next four; the close code is now logged. Not yet: the real
+Funnel path, and a phone off Wi-Fi.
 

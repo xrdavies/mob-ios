@@ -266,6 +266,8 @@ struct Machine: Codable, Identifiable, Hashable {
     /// macOS user for Screen Sharing sign-in (ARD), so the live view lands in that user's session.
     var vncUsername: String = ""
     var liveQuality: String?
+    /// The live view last needed mobd's WebSocket here (no UDP path): try it sooner next time.
+    var liveWebSocket: Bool?
     /// The office's ID from pairing; nil for machines added before pairing existed.
     var serverId: String?
     var clientId: String?

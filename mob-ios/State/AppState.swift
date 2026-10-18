@@ -249,11 +249,23 @@ final class AppState: MachineEvents {
             let quality = LiveQuality(rawValue: m.liveQuality ?? "") ?? .auto
             let w = Int(UIScreen.main.bounds.width * UIScreen.main.scale)
             let h = Int(UIScreen.main.bounds.height * UIScreen.main.scale)
-            stream.connect(client: apiClient, maxWidth: devicePixels(CGFloat(w), scale: 1), maxHeight: devicePixels(CGFloat(h), scale: 1), quality: quality, control: control)
+            // Remember which transport carried the picture, so the next connect races the WebSocket sooner.
+            let id = m.id
+            stream.onTransport = { [weak self] t in self?.rememberTransport(id, t) }
+            stream.connect(client: apiClient, maxWidth: devicePixels(CGFloat(w), scale: 1), maxHeight: devicePixels(CGFloat(h), scale: 1),
+                           quality: quality, control: control, preferWebSocket: m.liveWebSocket == true)
         } else {
             stream.disconnect()
             vnc.connect(request: apiClient.vncRequest, username: m.vncUsername, password: m.vncPassword)
         }
+    }
+
+    private func rememberTransport(_ id: String, _ t: LiveTransport) {
+        guard let i = machines.firstIndex(where: { $0.id == id }) else { return }
+        let ws: Bool? = t == .webSocket ? true : nil
+        guard machines[i].liveWebSocket != ws else { return }
+        machines[i].liveWebSocket = ws
+        saveMachines()
     }
 
     func closeLiveView() {

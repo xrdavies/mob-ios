@@ -1,3 +1,4 @@
+import CoreMedia
 import XCTest
 @testable import mob_ios
 
@@ -177,5 +178,34 @@ final class SnapshotSizeTests: XCTestCase {
         XCTAssertEqual(devicePixels(0, scale: 3), 64)
         XCTAssertEqual(devicePixels(400, scale: 0), 448) // unknown scale counts as 1
         XCTAssertEqual(devicePixels(10000, scale: 2), 8192)
+    }
+}
+
+final class WebSocketVideoTests: XCTestCase {
+    private let sps: [UInt8] = [0x67, 0x42, 0xe0, 0x1f, 0xda, 0x01, 0x40, 0x16, 0xec, 0x04, 0x40, 0x00, 0x00, 0x03, 0x00, 0x40, 0x00, 0x00, 0x0f, 0x23, 0xc6, 0x0c, 0x92]
+    private let pps: [UInt8] = [0x68, 0xce, 0x3c, 0x80]
+    private var keyframe: Data { Data([0, 0, 0, 1, 0x09, 0xf0, 0, 0, 0, 1] + sps + [0, 0, 0, 1] + pps + [0, 0, 1, 0x65, 0x88, 0x84]) }
+
+    func testParsesVideoMessages() {
+        var msg = Data([1])
+        var pts = UInt64(1_792_294_424_594_123).bigEndian
+        msg.append(Data(bytes: &pts, count: 8))
+        msg.append(1)
+        msg.append(keyframe)
+        XCTAssertEqual(parseWsVideo(msg), WsVideoMessage(pts: 1_792_294_424_594_123, key: true, data: keyframe))
+        msg[0] = 2 // a cursor image, not video
+        XCTAssertNil(parseWsVideo(msg))
+        XCTAssertNil(parseWsVideo(Data(count: 10)))
+    }
+
+    func testAnnexBToAVCCAndFormat() {
+        let units = annexBUnits(keyframe)
+        XCTAssertEqual(units.map { [UInt8]($0) }, [[0x09, 0xf0], sps, pps, [0x65, 0x88, 0x84]])
+        // Parameter sets and the delimiter go in the format description; the slice gets a 4-byte length.
+        XCTAssertEqual([UInt8](avccSample(units)), [0, 0, 0, 3, 0x65, 0x88, 0x84])
+        let format = h264Format(units)
+        XCTAssertNotNil(format)
+        if let format { XCTAssertEqual(CMVideoFormatDescriptionGetDimensions(format).width, 1280) }
+        XCTAssertNil(h264Format(annexBUnits(Data([0, 0, 0, 1, 0x41, 0x9a])))) // a delta frame has no SPS
     }
 }

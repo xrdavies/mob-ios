@@ -138,6 +138,14 @@ final class APIClient {
     }
 
     /// Closes a stream session (DELETE /stream/:id), fire and forget.
+    /// GET /stream/ws for an open session, with the device token in the header (native clients need
+    /// no ticket).
+    func streamSocketRequest(session: String) -> URLRequest {
+        var c = URLComponents(url: url("stream/ws", ["session": session]), resolvingAgainstBaseURL: false)!
+        c.scheme = c.scheme == "https" ? "wss" : "ws"
+        return request(c.url!)
+    }
+
     func closeStream(_ id: String) {
         Task {
             do { _ = try await send("DELETE", "stream/\(id)") }

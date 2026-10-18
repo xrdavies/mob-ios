@@ -74,7 +74,11 @@ private struct DesktopCanvas: View {
                 // Fills the canvas; the Metal view letterboxes the video itself (scaleAspectFit), the
                 // same fit the touch mapping assumes. Without a ratio, .aspectRatio would size it from
                 // the view's own small ideal size.
-                StreamVideoView(track: app.stream.track).frame(maxWidth: .infinity, maxHeight: .infinity)
+                Group {
+                    if app.stream.transport == .webSocket { WsVideoView(session: app.stream) }
+                    else { StreamVideoView(track: app.stream.track) }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if vncLive, let image = app.vnc.image {
                 Image(decorative: image, scale: 1).resizable().interpolation(.medium).aspectRatio(contentMode: .fit)
                     .overlay { ClickPing(click: latestClick(activities), geometry: screenGeometry(activities)) }
