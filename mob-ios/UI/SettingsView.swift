@@ -7,6 +7,8 @@ struct SettingsView: View {
     @State private var editing: Machine?
     @State private var pairing: PairRequest?
     @State private var deleting: Machine?
+    /// Opened once the edit sheet has gone (two sheets cannot be presented at once).
+    @State private var afterEdit: PairRequest?
     @State private var notificationsAllowed = true
 
     var body: some View {
@@ -69,8 +71,11 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
-            .sheet(item: $editing) { m in
-                MachineEditor(initial: m) { app.save($0) }
+            .sheet(item: $editing, onDismiss: {
+                pairing = afterEdit
+                afterEdit = nil
+            }) { m in
+                MachineEditor(initial: m, onSave: { app.save($0) }, onPairAgain: { afterEdit = PairRequest(machine: m) }, onRemove: { app.delete(m) })
             }
             .sheet(item: $pairing) { PairingSheet(existing: $0.machine) }
             .confirmationDialog("Remove \(deleting?.name ?? "")?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), titleVisibility: .visible) {
@@ -131,12 +136,17 @@ private struct MachineEditor: View {
     @Environment(AppState.self) private var app
     @State var machine: Machine
     @State private var quality: LiveQuality = .auto
+    @State private var removing = false
     let onSave: (Machine) -> Void
+    let onPairAgain: () -> Void
+    let onRemove: () -> Void
 
-    init(initial: Machine, onSave: @escaping (Machine) -> Void) {
+    init(initial: Machine, onSave: @escaping (Machine) -> Void, onPairAgain: @escaping () -> Void, onRemove: @escaping () -> Void) {
         _machine = State(initialValue: initial)
         _quality = State(initialValue: LiveQuality(rawValue: initial.liveQuality ?? "") ?? .auto)
         self.onSave = onSave
+        self.onPairAgain = onPairAgain
+        self.onRemove = onRemove
     }
 
     var body: some View {
@@ -145,8 +155,12 @@ private struct MachineEditor: View {
                 Section {
                     TextField("Name (Office Mac)", text: $machine.name)
                     LabeledContent("Address", value: machine.mobdUrl)
+                    Button("Change address…") {
+                        onPairAgain()
+                        dismiss()
+                    }
                 } footer: {
-                    Text("The address comes from the pairing link. If the office Mac moved, use Pair again with a new link.")
+                    Text("The address comes from the pairing link. To change it, run mobd link --url <new address> on the office Mac and pair again; the device credential is never sent to an unverified address.")
                 }
                 Section {
                     Picker("Quality", selection: $quality) {
@@ -158,6 +172,17 @@ private struct MachineEditor: View {
                     Text("Live desktop quality")
                 } footer: {
                     Text("\(quality.hint). Applies at once; an open live view reconnects.")
+                }
+                Section {
+                    Button("Remove machine", role: .destructive) { removing = true }
+                } footer: {
+                    Text("Only removes it from this phone. Chats stay on the office Mac.")
+                }
+            }
+            .confirmationDialog("Remove \(machine.name)?", isPresented: $removing, titleVisibility: .visible) {
+                Button("Remove", role: .destructive) {
+                    onRemove()
+                    dismiss()
                 }
             }
             // Like the desktop app: the quality applies at once (Save only renames).
