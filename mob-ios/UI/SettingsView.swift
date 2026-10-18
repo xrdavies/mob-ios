@@ -130,11 +130,13 @@ private struct MachineEditor: View {
     @Environment(\.dismiss) private var dismiss
     @State var machine: Machine
     @State private var password: String
+    @State private var quality: LiveQuality = .auto
     let onSave: (Machine, String) -> Void
 
     init(initial: Machine, onSave: @escaping (Machine, String) -> Void) {
         _machine = State(initialValue: initial)
         _password = State(initialValue: initial.vncPassword)
+        _quality = State(initialValue: LiveQuality(rawValue: initial.liveQuality ?? "") ?? .auto)
         self.onSave = onSave
     }
 
@@ -156,6 +158,20 @@ private struct MachineEditor: View {
                 } footer: {
                     Text("With a user name the live view signs in as that user, like Screen Sharing.app. A Screen Sharing (VNC) password alone, with no user name, opens the login window. Stored in this phone's Keychain only; without either the desktop shows snapshots.")
                 }
+                Section {
+                    Picker("Quality", selection: $quality) {
+                        ForEach(LiveQuality.allCases) { q in
+                            Text(q.label).tag(q)
+                        }
+                    }
+                } header: {
+                    Text("Live desktop quality")
+                } footer: {
+                    Text(quality.hint)
+                }
+            }
+            .onChange(of: quality) { _, new in
+                machine.liveQuality = new.rawValue
             }
             .navigationTitle("Edit machine")
             .navigationBarTitleDisplayMode(.inline)

@@ -60,11 +60,16 @@ private struct DesktopCanvas: View {
     @State private var snapshotAt: Date?
 
     var body: some View {
-        let live = app.vnc.state.status == .connected
+        let streaming = app.streaming
+        let streamLive = streaming && app.stream.state.status == .connected
+        let vncLive = !streaming && app.vnc.state.status == .connected
+        let live = streamLive || vncLive
         let activities = app.chat.detail?.activities ?? []
         ZStack {
             Color.black
-            if live, let image = app.vnc.image {
+            if streamLive {
+                StreamVideoView(track: app.stream.track).aspectRatio(contentMode: .fit)
+            } else if vncLive, let image = app.vnc.image {
                 Image(decorative: image, scale: 1).resizable().interpolation(.medium).aspectRatio(contentMode: .fit)
                     .overlay { ClickPing(click: latestClick(activities), geometry: screenGeometry(activities)) }
             } else if let snapshot {
@@ -174,8 +179,10 @@ struct LiveView: View {
     @State private var typing = false
 
     var body: some View {
+        let streaming = app.streaming
         let vnc = app.vnc
-        let s = vnc.state
+        let stream = app.stream
+        let s = streaming ? stream.state : vnc.state
         let live = s.status == .connected
         VStack(spacing: 0) {
             HStack {
@@ -184,7 +191,9 @@ struct LiveView: View {
                 StatusChip()
                 Spacer()
                 if live {
-                    Picker("Mode", selection: Binding(get: { s.control }, set: { vnc.setControl($0) })) {
+                    Picker("Mode", selection: Binding(get: { s.control }, set: {
+                        if streaming { stream.setControl($0) } else { vnc.setControl($0) }
+                    })) {
                         Text("View").tag(false)
                         Text("Control").tag(true)
                     }
@@ -242,28 +251,46 @@ struct LiveView: View {
     }
 
     private func handler(size: CGSize, fw: Int, fh: Int) -> TouchHandler {
+        let streaming = app.streaming
         let vnc = app.vnc
+        let stream = app.stream
         func remote(_ p: CGPoint) -> (x: Int, y: Int) { toDesktop(p, size: size, fw: max(fw, 1), fh: max(fh, 1), scale: scale, offset: offset) }
+        func norm(_ p: CGPoint) -> (x: Double, y: Double)? {
+            guard let n = normalizePoint(p, in: size, video: CGSize(width: fw, height: fh)) else { return nil }
+            return (n.x, n.y)
+        }
         return TouchHandler(
             click: { p, right in
-                let at = remote(p)
-                vnc.click(x: at.x, y: at.y, button: right ? VncSession.buttonRight : VncSession.buttonLeft)
-                mark = at
+                if streaming, let n = norm(p) {
+                    stream.click(n.x, n.y, right: right)
+                } else {
+                    let at = remote(p)
+                    vnc.click(x: at.x, y: at.y, button: right ? VncSession.buttonRight : VncSession.buttonLeft)
+                    mark = at
+                }
             },
             drag: { p, phase in
-                let at = remote(p)
-                switch phase {
-                case .began:
-                    vnc.pointer(x: at.x, y: at.y, buttons: 0)
-                    vnc.pointer(x: at.x, y: at.y, buttons: VncSession.buttonLeft)
-                case .changed: vnc.pointer(x: at.x, y: at.y, buttons: VncSession.buttonLeft)
-                default: vnc.pointer(x: at.x, y: at.y, buttons: 0)
+                if streaming, let n = norm(p) {
+                    stream.drag(n.x, n.y, phase)
+                } else {
+                    let at = remote(p)
+                    switch phase {
+                    case .began:
+                        vnc.pointer(x: at.x, y: at.y, buttons: 0)
+                        vnc.pointer(x: at.x, y: at.y, buttons: VncSession.buttonLeft)
+                    case .changed: vnc.pointer(x: at.x, y: at.y, buttons: VncSession.buttonLeft)
+                    default: vnc.pointer(x: at.x, y: at.y, buttons: 0)
+                    }
+                    mark = at
                 }
-                mark = at
             },
             scroll: { p, dx, dy in
-                let at = remote(p)
-                vnc.scroll(x: at.x, y: at.y, dx: dx, dy: dy)
+                if streaming, let n = norm(p) {
+                    stream.scroll(n.x, n.y, dx: Double(dx), dy: Double(dy))
+                } else {
+                    let at = remote(p)
+                    vnc.scroll(x: at.x, y: at.y, dx: dx, dy: dy)
+                }
             },
             zoom: { factor, pan in
                 scale = min(max(scale * factor, 1), 6)
@@ -285,22 +312,40 @@ private struct KeysBar: View {
     @Binding var typing: Bool
 
     var body: some View {
+        let streaming = app.streaming
         let vnc = app.vnc
+        let stream = app.stream
+        let mods: [String] = streaming ? stream.modifiers : vnc.modifiers.map { String($0) }
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 key(typing ? "keyboard.chevron.compact.down" : "keyboard", system: true, on: typing, label: "Keyboard") { typing.toggle() }
-                ForEach([("⌘", VncSession.xkMeta), ("⌥", VncSession.xkAlt), ("⌃", VncSession.xkControl), ("⇧", VncSession.xkShift)], id: \.1) { label, sym in
-                    key(label, on: vnc.modifiers.contains(sym), label: "Hold \(label) for the next key") { vnc.toggleModifier(sym) }
+                if streaming {
+                    ForEach([("⌘", "MetaLeft"), ("⌥", "AltLeft"), ("⌃", "ControlLeft"), ("⇧", "ShiftLeft")], id: \.1) { label, code in
+                        key(label, on: mods.contains(code), label: "Hold \(label) for the next key") { stream.toggleModifier(code) }
+                    }
+                    key("esc", label: "Escape") { stream.tapKey("Escape") }
+                    key("tab", label: "Tab") { stream.tapKey("Tab") }
+                    key("←", label: "Left") { stream.tapKey("ArrowLeft") }
+                    key("↑", label: "Up") { stream.tapKey("ArrowUp") }
+                    key("↓", label: "Down") { stream.tapKey("ArrowDown") }
+                    key("→", label: "Right") { stream.tapKey("ArrowRight") }
+                    key("⌫", label: "Delete") { stream.tapKey("Backspace") }
+                    key("⏎", label: "Return") { stream.tapKey("Enter") }
+                    key("Paste", label: "Type the phone's clipboard") { if let s = UIPasteboard.general.string { stream.typeText(s) } }
+                } else {
+                    ForEach([("⌘", VncSession.xkMeta), ("⌥", VncSession.xkAlt), ("⌃", VncSession.xkControl), ("⇧", VncSession.xkShift)], id: \.1) { label, sym in
+                        key(label, on: vnc.modifiers.contains(sym), label: "Hold \(label) for the next key") { vnc.toggleModifier(sym) }
+                    }
+                    key("esc", label: "Escape") { vnc.tapKey(VncSession.xkEscape) }
+                    key("tab", label: "Tab") { vnc.tapKey(VncSession.xkTab) }
+                    key("←", label: "Left") { vnc.tapKey(VncSession.xkLeft) }
+                    key("↑", label: "Up") { vnc.tapKey(VncSession.xkUp) }
+                    key("↓", label: "Down") { vnc.tapKey(VncSession.xkDown) }
+                    key("→", label: "Right") { vnc.tapKey(VncSession.xkRight) }
+                    key("⌫", label: "Delete") { vnc.tapKey(VncSession.xkBackspace) }
+                    key("⏎", label: "Return") { vnc.tapKey(VncSession.xkReturn) }
+                    key("Paste", label: "Type the phone's clipboard") { if let s = UIPasteboard.general.string { vnc.typeText(s) } }
                 }
-                key("esc", label: "Escape") { vnc.tapKey(VncSession.xkEscape) }
-                key("tab", label: "Tab") { vnc.tapKey(VncSession.xkTab) }
-                key("←", label: "Left") { vnc.tapKey(VncSession.xkLeft) }
-                key("↑", label: "Up") { vnc.tapKey(VncSession.xkUp) }
-                key("↓", label: "Down") { vnc.tapKey(VncSession.xkDown) }
-                key("→", label: "Right") { vnc.tapKey(VncSession.xkRight) }
-                key("⌫", label: "Delete") { vnc.tapKey(VncSession.xkBackspace) }
-                key("⏎", label: "Return") { vnc.tapKey(VncSession.xkReturn) }
-                key("Paste", label: "Type the phone's clipboard") { if let s = UIPasteboard.general.string { vnc.typeText(s) } }
             }
             .padding(.horizontal, 10).padding(.vertical, 6)
         }
