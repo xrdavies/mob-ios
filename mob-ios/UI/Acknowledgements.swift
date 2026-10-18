@@ -14,7 +14,7 @@ enum Acknowledgements {
     static let mob = Item(name: "mob-ios", license: "MIT", url: "https://github.com/xrdavies/mob-ios", text: """
 MIT License
 
-Copyright (c) 2026 MOB contributors
+Copyright (c) 2026 Frozen and MOB contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
