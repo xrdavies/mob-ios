@@ -43,6 +43,7 @@ final class AppState: MachineEvents {
     let chat = ChatStore()
     /// One live view shared by the thumbnail and the full-screen view.
     let vnc = VncSession()
+    let stream = StreamSession()
     let notifier = Notifier()
 
     /// The app is on screen (notifications for the open chat are skipped then).
@@ -230,17 +231,44 @@ final class AppState: MachineEvents {
 
     func releaseDesktop() {
         desktopUsers -= 1
-        if desktopUsers == 0 { vnc.disconnect() }
+        if desktopUsers == 0 {
+            vnc.disconnect()
+            stream.disconnect()
+        }
     }
 
     func connectDesktop() {
-        guard let m = activeMachine, !m.needsPairing else { return vnc.disconnect() }
-        vnc.connect(request: apiClient.vncRequest, username: m.vncUsername, password: m.vncPassword)
+        guard let m = activeMachine, !m.needsPairing else {
+            vnc.disconnect()
+            stream.disconnect()
+            return
+        }
+        if streaming {
+            vnc.disconnect()
+            let quality = LiveQuality(rawValue: m.liveQuality ?? "") ?? .auto
+            let w = Int(UIScreen.main.bounds.width * UIScreen.main.scale)
+            let h = Int(UIScreen.main.bounds.height * UIScreen.main.scale)
+            stream.connect(client: apiClient, maxWidth: devicePixels(CGFloat(w), scale: 1), maxHeight: devicePixels(CGFloat(h), scale: 1), quality: quality)
+        } else {
+            stream.disconnect()
+            vnc.connect(request: apiClient.vncRequest, username: m.vncUsername, password: m.vncPassword)
+        }
     }
 
     func closeLiveView() {
         vnc.setControl(false)
+        stream.setControl(false)
         showLiveView = false
+    }
+
+    /// The live desktop goes over WebRTC when mobd has the `stream` feature; VNC otherwise.
+    var streaming: Bool { health?.supports("stream") == true }
+
+    func setLiveQuality(_ id: String, _ quality: LiveQuality) {
+        guard let i = machines.firstIndex(where: { $0.id == id }) else { return }
+        machines[i].liveQuality = quality.rawValue
+        saveMachines()
+        if id == activeMachineId, desktopUsers > 0 { connectDesktop() }
     }
 
     // MARK: - Events and notifications

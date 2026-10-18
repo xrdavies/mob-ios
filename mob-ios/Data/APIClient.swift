@@ -123,6 +123,30 @@ final class APIClient {
 
     func health() async throws -> Health { try await get("health") }
 
+    struct StreamAnswer: Decodable {
+        let session: String
+        let answer: String?
+        let width: Int
+        let height: Int
+    }
+
+    /// Opens a live desktop session (POST /stream); the answer has `session`, `width`, `height` and
+    /// optionally `answer` (the remote SDP when mobd negotiated WebRTC; nil means WebSocket only).
+    func openStream(offer: String, maxWidth: Int, maxHeight: Int, quality: String) async throws -> StreamAnswer {
+        let data = try await send("POST", "stream", body: ["offer": offer, "maxWidth": maxWidth, "maxHeight": maxHeight, "quality": quality])
+        return try APIClient.decoder.decode(StreamAnswer.self, from: data)
+    }
+
+    /// Closes a stream session (DELETE /stream/:id), fire and forget.
+    func closeStream(_ id: String) {
+        Task {
+            do { _ = try await send("DELETE", "stream/\(id)") }
+            catch {
+                Task { @MainActor in Log.error("closeStream: \(readable(error))") }
+            }
+        }
+    }
+
     /// archived: "false" (default), "true" or "all".
     func sessions(archived: String = "false") async throws -> [Session] {
         (try await get("sessions", query: ["archived": archived]) as SessionsResponse).sessions ?? []

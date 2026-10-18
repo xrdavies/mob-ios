@@ -265,6 +265,7 @@ struct Machine: Codable, Identifiable, Hashable {
     var mobdUrl: String
     /// macOS user for Screen Sharing sign-in (ARD), so the live view lands in that user's session.
     var vncUsername: String = ""
+    var liveQuality: String?
     /// The office's ID from pairing; nil for machines added before pairing existed.
     var serverId: String?
     var clientId: String?
@@ -278,7 +279,7 @@ struct Machine: Codable, Identifiable, Hashable {
 }
 
 extension Machine {
-    private enum Keys: String, CodingKey { case id, name, mobdUrl, vncUsername, serverId, clientId, needsPairing }
+    private enum Keys: String, CodingKey { case id, name, mobdUrl, vncUsername, liveQuality, serverId, clientId, needsPairing }
 
     /// Older saves have no pairing fields: such machines need pairing.
     init(from decoder: Decoder) throws {
@@ -287,6 +288,7 @@ extension Machine {
         name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
         mobdUrl = try c.decodeIfPresent(String.self, forKey: .mobdUrl) ?? ""
         vncUsername = try c.decodeIfPresent(String.self, forKey: .vncUsername) ?? ""
+        liveQuality = try c.decodeIfPresent(String.self, forKey: .liveQuality)
         serverId = try c.decodeIfPresent(String.self, forKey: .serverId)
         clientId = try c.decodeIfPresent(String.self, forKey: .clientId)
         needsPairing = try c.decodeIfPresent(Bool.self, forKey: .needsPairing) ?? (serverId == nil)
@@ -298,6 +300,7 @@ extension Machine {
         try c.encode(name, forKey: .name)
         try c.encode(mobdUrl, forKey: .mobdUrl)
         try c.encode(vncUsername, forKey: .vncUsername)
+        try c.encodeIfPresent(liveQuality, forKey: .liveQuality)
         try c.encodeIfPresent(serverId, forKey: .serverId)
         try c.encodeIfPresent(clientId, forKey: .clientId)
         try c.encode(needsPairing, forKey: .needsPairing)
