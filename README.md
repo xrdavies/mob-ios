@@ -49,6 +49,10 @@ xcodebuild -project mob-ios.xcodeproj -scheme mob-ios -destination 'platform=iOS
 
 `LiveStreamTests` open a real live view and are skipped unless `MOBD_URL` and `MOBD_TOKEN` (a paired device credential) are set; they only move the office pointer. The UI tests (`mob-iosUITests`) drive the app against a real mobd and expect a paired machine in the simulator; they create and send in a new chat.
 
+## Releases
+
+Not on the App Store yet. Releases go through TestFlight and the App Store by hand (no CI); see [docs/releases.md](docs/releases.md) for the release runbook (signing, App Store Connect, review, checklist).
+
 ## Architecture
 
 - **SwiftUI** on iOS 17 Observation (`@Observable`)
