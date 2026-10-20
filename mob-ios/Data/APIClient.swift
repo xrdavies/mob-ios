@@ -1,10 +1,12 @@
 import Foundation
 import UIKit
 
-/// A failure with a message the user can read (mobd answers errors as {"error": "..."}).
+/// A failure with a message the user can read (mobd answers errors as {"error": "...", "code": "..."}).
 struct APIError: LocalizedError {
     let message: String
     let status: Int?
+    /// mobd's machine-readable reason (no_desktop, browser_running…), when it sends one.
+    var code: String? = nil
     var errorDescription: String? { message }
     /// mobd no longer accepts this device's token.
     var isUnauthorized: Bool { status == 401 }
@@ -87,8 +89,8 @@ final class APIClient {
     private func check(_ data: Data, _ response: URLResponse) throws {
         guard let http = response as? HTTPURLResponse else { return }
         guard (200..<300).contains(http.statusCode) else {
-            let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
-            throw APIError(message: message ?? "HTTP \(http.statusCode)", status: http.statusCode)
+            let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            throw APIError(message: body?["error"] as? String ?? "HTTP \(http.statusCode)", status: http.statusCode, code: body?["code"] as? String)
         }
     }
 
@@ -118,9 +120,16 @@ final class APIClient {
 
     /// Opens a live desktop session (POST /stream); the answer has `session`, `width`, `height` and
     /// optionally `answer` (the remote SDP when mobd negotiated WebRTC; nil means WebSocket only).
-    func openStream(offer: String, maxWidth: Int, maxHeight: Int, quality: String) async throws -> StreamAnswer {
-        let data = try await send("POST", "stream", body: ["offer": offer, "maxWidth": maxWidth, "maxHeight": maxHeight, "quality": quality])
-        return try APIClient.decoder.decode(StreamAnswer.self, from: data)
+    func openStream(offer: String, maxWidth: Int, maxHeight: Int, quality: String, sessionId: String? = nil) async throws -> StreamAnswer {
+        let body = APIClient.streamBody(offer: offer, maxWidth: maxWidth, maxHeight: maxHeight, quality: quality, sessionId: sessionId)
+        return try APIClient.decoder.decode(StreamAnswer.self, from: await send("POST", "stream", body: body))
+    }
+
+    /// The POST /stream body; `sessionId` picks the conversation's desktop (mobd with `sessionDesktops`).
+    static func streamBody(offer: String, maxWidth: Int, maxHeight: Int, quality: String, sessionId: String?) -> [String: Any] {
+        var body: [String: Any] = ["offer": offer, "maxWidth": maxWidth, "maxHeight": maxHeight, "quality": quality]
+        if let sessionId { body["sessionId"] = sessionId }
+        return body
     }
 
     /// Closes a stream session (DELETE /stream/:id), fire and forget.
@@ -189,19 +198,38 @@ final class APIClient {
         _ = try await send("POST", "tasks/\(task)/questions/\(question)/answer", body: body)
     }
 
-    /// A desktop snapshot from GET /screen; nil when the screen is unchanged since `etag` (304), so
-    /// polling an idle desktop downloads nothing.
-    func screen(maxWidth: Int, etag: String?) async throws -> (image: UIImage, etag: String?)? {
-        var req = request(url("screen", ["maxWidth": String(maxWidth), "quality": "65"]))
+    /// GET /screen at `maxWidth`; `sessionId` picks the conversation's desktop (mobd with `sessionDesktops`).
+    func screenURL(maxWidth: Int, sessionId: String?) -> URL {
+        var query = ["maxWidth": String(maxWidth), "quality": "65"]
+        if let sessionId { query["sessionId"] = sessionId }
+        return url("screen", query)
+    }
+
+    /// A desktop snapshot from GET /screen; `image` is nil when the screen is unchanged since `etag`
+    /// (304), so polling an idle desktop downloads nothing. `asleep`: the last frame of a sleeping
+    /// desktop, which a snapshot does not wake.
+    func screen(maxWidth: Int, etag: String?, sessionId: String? = nil) async throws -> (image: UIImage?, etag: String?, asleep: Bool) {
+        var req = request(screenURL(maxWidth: maxWidth, sessionId: sessionId))
         req.cachePolicy = .reloadIgnoringLocalCacheData
         if let etag { req.setValue(etag, forHTTPHeaderField: "If-None-Match") }
         let (data, response) = try await session.data(for: req)
         let http = response as? HTTPURLResponse
-        if http?.statusCode == 304 { return nil }
+        let asleep = http?.value(forHTTPHeaderField: "X-Mob-Desktop-State") == "asleep"
+        if http?.statusCode == 304 { return (nil, etag, asleep) }
         try check(data, response)
         guard let image = UIImage(data: data) else { throw APIError(message: "Not an image", status: nil) }
-        return (image, http?.value(forHTTPHeaderField: "ETag"))
+        return (image, http?.value(forHTTPHeaderField: "ETag"), asleep)
     }
+
+    // MARK: Conversation desktops (Linux mobd)
+
+    func desktops() async throws -> DesktopsResponse { try await get("desktops") }
+
+    /// Stops the conversation's running turn, then closes its desktop.
+    func closeDesktop(_ sessionId: String) async throws { _ = try await send("DELETE", "desktops/\(sessionId)") }
+
+    /// New conversations start with this conversation's browser profiles.
+    func seedDesktop(_ sessionId: String) async throws { _ = try await send("POST", "desktops/\(sessionId)/seed") }
 
     func image(_ url: URL) async throws -> UIImage {
         let (data, response) = try await session.data(for: request(url))

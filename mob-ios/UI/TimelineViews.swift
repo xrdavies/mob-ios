@@ -4,6 +4,7 @@ private let runnerLabels = ["codex": "Codex", "claude": "Claude Code"]
 
 /// One timeline entry. `last` marks the newest turn footer (it offers Retry).
 struct TimelineRow: View {
+    @Environment(AppState.self) private var app
     let item: TimelineItem
     let runner: String?
     let last: Bool
@@ -16,7 +17,7 @@ struct TimelineRow: View {
         case .group(_, let acts): ActivityGroup(activities: acts).padding(.leading, 34)
         case .ask(_, let q): QuestionCard(q: q).padding(.leading, 34)
         case .queued(_, let t):
-            Label("Queued\(t.queuePosition.map { " #\($0)" } ?? "") · waits for the desktop", systemImage: "clock")
+            Label(queuedLabel(t), systemImage: "clock")
                 .font(.caption).foregroundStyle(.secondary).padding(.leading, 34)
         case .working(_, _, let latest, let waiting):
             HStack(spacing: 8) {

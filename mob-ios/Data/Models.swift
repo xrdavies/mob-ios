@@ -27,6 +27,9 @@ struct Health: Codable {
 
     func supports(_ feature: String) -> Bool { features?.contains(feature) ?? false }
 
+    /// Linux mobd: every conversation has its own desktop, picked by `sessionId` on /stream and /screen.
+    var sessionDesktops: Bool { supports("sessionDesktops") }
+
     func runner(_ name: String?) -> Runner? {
         let list = runners ?? []
         return list.first { $0.name == (name ?? runner) } ?? list.first { $0.isDefault == true }
@@ -98,6 +101,8 @@ struct AgentTask: Codable, Identifiable, Hashable {
     var usage: Usage?
     var error: String?
     var queuePosition: Int?
+    /// Why a queued turn still waits: slots, desktops, memory, disk or desktopStarting (Linux mobd).
+    var queueReason: String?
     /// True while the turn waits for the user to answer a question.
     var waiting: Bool?
 }
@@ -222,6 +227,52 @@ struct Activity: Codable, Identifiable, Hashable {
 struct QueueState: Codable {
     let running: [AgentTask]?
     let queued: [AgentTask]?
+}
+
+/// A conversation's desktop on Linux mobd (GET /desktops and the global "desktop" event).
+struct DesktopInfo: Codable, Identifiable, Hashable {
+    let sessionId: String
+    var title: String?
+    var display: String?
+    var width: Int?
+    var height: Int?
+    var scale: Double?
+    /// starting, running, asleep, waking, closing, closed or failed.
+    var state: String
+    /// Why it closed or failed (archived, deleted, user, crashed…), or "oomKill" when the kernel ended one of its apps.
+    var reason: String?
+    var memoryBytes: Int64?
+    var diskBytes: Int64?
+    var startedAt: String?
+    var lastUsedAt: String?
+    var activeTaskId: String?
+    var viewers: Int?
+
+    var id: String { sessionId }
+}
+
+/// The office computer's memory; `level` is "ok", "low" or "critical".
+struct MemoryInfo: Codable, Hashable {
+    let level: String
+    var availableBytes: Int64?
+    var totalBytes: Int64?
+    var pressure: Double?
+    var warnPercent: Double?
+    var floorPercent: Double?
+}
+
+struct DiskInfo: Codable, Hashable {
+    let level: String
+    var freeBytes: Int64?
+    var totalBytes: Int64?
+    var path: String?
+}
+
+/// GET /desktops: largest memory first; only `desktops: []` with one shared desktop.
+struct DesktopsResponse: Codable {
+    let desktops: [DesktopInfo]?
+    let memory: MemoryInfo?
+    let disk: DiskInfo?
 }
 
 struct SessionsResponse: Codable { let sessions: [Session]? }

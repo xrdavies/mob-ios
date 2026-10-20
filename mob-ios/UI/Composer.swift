@@ -198,7 +198,7 @@ struct Composer: View {
                     Text("Stopping…").foregroundStyle(.red)
                 } else if task.status == Status.queued {
                     Circle().fill(.secondary).frame(width: 8, height: 8)
-                    Text("Queued\(task.queuePosition.map { " #\($0)" } ?? "") · waits for the desktop").foregroundStyle(.secondary)
+                    Text(queuedLabel(task)).foregroundStyle(.secondary)
                 } else if task.waiting == true || chat.detail?.questions.contains(where: \.isPending) == true {
                     Circle().fill(Color.waiting).frame(width: 8, height: 8)
                     Text("Waiting for your answer").foregroundStyle(Color.waiting)

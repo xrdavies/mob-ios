@@ -61,6 +61,12 @@ private struct DesktopCanvas: View {
     @State private var snapshotTag: String?
     @State private var snapshotError: String?
     @State private var snapshotAt: Date?
+    /// The last frame is from a sleeping desktop; it is not woken.
+    @State private var asleep = false
+    /// The conversation has no desktop yet (409 no_desktop).
+    @State private var noDesktop = false
+    /// Which conversation the snapshot belongs to; cleared when it changes.
+    @State private var snapshotFor: String?
 
     var body: some View {
         let live = app.stream.state.status == .connected
@@ -79,31 +85,46 @@ private struct DesktopCanvas: View {
             } else if let snapshot {
                 Image(uiImage: snapshot).resizable().aspectRatio(contentMode: .fit)
                     .overlay { ClickPing(click: latestClick(activities), geometry: screenGeometry(activities)) }
+            } else if asleep, let snapshot {
+                Image(uiImage: snapshot).resizable().aspectRatio(contentMode: .fit)
             } else {
                 Text(placeholder).font(.caption).foregroundStyle(.white.opacity(0.7)).multilineTextAlignment(.center).padding()
             }
         }
         .overlay(alignment: .bottomLeading) { if !live { snapshotLabel } }
+        .overlay(alignment: .bottomLeading) { if asleep { asleepBadge } }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
-        .task(id: "\(live) \(app.activeMachine?.needsPairing == true) \(devicePixels(width, scale: displayScale))") {
+        .task(id: taskId) {
             let pixels = devicePixels(width, scale: displayScale)
+            let sessionId = app.health?.sessionDesktops == true ? app.chat.currentId : nil
             guard !live, width > 0, app.activeMachine?.needsPairing != true else { return }
+            // Another conversation: clear its snapshot.
+            if sessionId != snapshotFor { snapshot = nil; snapshotTag = nil; asleep = false; noDesktop = false; snapshotFor = sessionId }
             while !Task.isCancelled {
                 do {
                     // A size change starts a new task and a new download; otherwise unchanged costs a 304.
-                    if let fresh = try await app.apiClient.screen(maxWidth: pixels, etag: snapshot == nil ? nil : snapshotTag) {
-                        snapshot = fresh.image
-                        snapshotTag = fresh.etag
-                    }
+                    let fresh = try await app.apiClient.screen(maxWidth: pixels, etag: snapshot == nil ? nil : snapshotTag, sessionId: sessionId)
+                    if let image = fresh.image { snapshot = image; snapshotTag = fresh.etag }
+                    asleep = fresh.asleep
+                    noDesktop = false
                     snapshotAt = Date()
                     snapshotError = nil
                 } catch {
-                    if !(error is CancellationError) { snapshotError = readable(error) }
+                    if !(error is CancellationError) {
+                        if (error as? APIError)?.code == "no_desktop" { noDesktop = true; snapshotError = nil }
+                        else { snapshotError = readable(error) }
+                    }
                     if error.isUnauthorized { return app.noteFailure(error) }
                 }
                 try? await Task.sleep(for: .seconds(2))
             }
         }
+    }
+
+    private var taskId: String {
+        let live = app.stream.state.status == .connected
+        let s = app.health?.sessionDesktops == true ? app.chat.currentId ?? "none" : "shared"
+        return "\(live) \(app.activeMachine?.needsPairing == true) \(devicePixels(width, scale: displayScale)) \(s)"
     }
 
     /// "Snapshot · 17:33:05", or mobd's reason snapshots fail (locked, asleep, no Screen Recording).
@@ -126,8 +147,20 @@ private struct DesktopCanvas: View {
     private var placeholder: String {
         let s = app.liveState
         if s.status == .connecting { return "Connecting…" }
+        if noDesktop || (app.health?.sessionDesktops == true && app.chat.currentId == nil) { return noDesktopText }
         let parts = [s.detail.isEmpty ? nil : s.detail, snapshotError.map { "Snapshot: \($0)" }].compactMap { $0 }
         return parts.isEmpty ? "Office desktop is not connected" : parts.joined(separator: "\n")
+    }
+
+    @ViewBuilder private var asleepBadge: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "moon.fill").font(.caption2)
+            Text("Asleep").font(.caption2.weight(.medium))
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 6).padding(.vertical, 3)
+        .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 6))
+        .padding(8)
     }
 }
 

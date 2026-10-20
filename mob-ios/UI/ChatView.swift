@@ -92,6 +92,7 @@ struct ChatView: View {
     /// Timeline and composer, kept to a readable width on wide screens.
     private func chatColumn(_ items: [TimelineItem], lastFooter: String?, thumbnailOnTop: Bool) -> some View {
         VStack(spacing: 0) {
+            if let banner = app.desktops.visibleBanner { ResourceBannerView(banner: banner) }
             if thumbnailOnTop, app.showDesktopDrawer, app.activeMachine != nil {
                 DesktopThumbnail()
                     .transition(.move(edge: .top).combined(with: .opacity))
@@ -188,6 +189,9 @@ struct SessionList: View {
     @State private var renaming: Session?
     @State private var newTitle = ""
     @State private var deleting: Session?
+    @State private var confirmArchive: Session?
+    @State private var confirmClose: Session?
+    @State private var seedNotice: String?
     @State private var query = ""
 
     private var chat: ChatStore { app.chat }
@@ -264,13 +268,37 @@ struct SessionList: View {
             Button("Cancel", role: .cancel) {}
         }
         .confirmationDialog(
-            "Delete “\(deleting?.displayTitle ?? "")”?",
+            Text("Delete \"\\(deleting?.displayTitle ?? \"\")\"?"),
             isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
             titleVisibility: .visible
         ) {
             Button("Delete", role: .destructive) { if let s = deleting { chat.delete(s) } }
         } message: {
-            Text("The chat and its screenshots are removed from the office Mac. This cannot be undone.")
+            let extra = app.desktops.mark(deleting?.id ?? "") != nil ? " Its desktop closes; open windows are lost." : ""
+            Text("The chat and its screenshots are removed from the office Mac. This cannot be undone.\\(extra)")
+        }
+        .confirmationDialog(
+            Text("Close desktop?"),
+            isPresented: Binding(get: { confirmClose != nil }, set: { if !$0 { confirmClose = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Close desktop", role: .destructive) {
+                if let s = confirmClose { app.desktops.close(s.id) { if let e = $0 { chat.error = e } } }
+            }
+        } message: {
+            Text("The running turn will be stopped and open windows closed. Files and browser logins are kept.")
+        }
+        .confirmationDialog(
+            Text("Archive \"\\(confirmArchive?.displayTitle ?? \"\")\"?"),
+            isPresented: Binding(get: { confirmArchive != nil }, set: { if !$0 { confirmArchive = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Archive") { if let s = confirmArchive { chat.setArchived(s, true) } }
+        } message: {
+            Text("Its desktop closes; open windows are lost.")
+        }
+        .alert(seedNotice ?? "", isPresented: Binding(get: { seedNotice != nil }, set: { if !$0 { seedNotice = nil } })) {
+            Button("OK", role: .cancel) {}
         }
     }
 
@@ -318,7 +346,7 @@ struct SessionList: View {
             if !Status.busy(s.status) {
                 Button(role: .destructive) { deleting = s } label: { Label("Delete", systemImage: "trash") }
             }
-            Button { chat.setArchived(s, s.archived != true) } label: {
+            Button { archive(s, s.archived != true) } label: {
                 Label(s.archived == true ? "Unarchive" : "Archive", systemImage: s.archived == true ? "tray.and.arrow.up" : "archivebox")
             }
             .tint(.indigo)
@@ -334,11 +362,26 @@ struct SessionList: View {
             if s.archived != true {
                 Button { chat.setPinned(s, s.pinned != true) } label: { Label(s.pinned == true ? "Unpin" : "Pin", systemImage: "pin") }
             }
-            Button { chat.setArchived(s, s.archived != true) } label: {
+            if app.desktops.mark(s.id) != nil {
+                Button { confirmClose = s } label: { Label("Close desktop", systemImage: "xmark.circle") }
+                Button { seedDesktop(s.id) } label: { Label("Use this browser profile for new conversations", systemImage: "globe") }
+            }
+            Button { archive(s, s.archived != true) } label: {
                 Label(s.archived == true ? "Unarchive" : "Archive", systemImage: "archivebox")
             }
             Button(role: .destructive) { deleting = s } label: { Label("Delete", systemImage: "trash") }
                 .disabled(Status.busy(s.status))
+        }
+    }
+
+    private func archive(_ s: Session, _ archived: Bool) {
+        if archived && app.desktops.mark(s.id) != nil { confirmArchive = s }
+        else { chat.setArchived(s, archived) }
+    }
+
+    private func seedDesktop(_ id: String) {
+        app.desktops.seed(id) { error in
+            seedNotice = error ?? "New conversations start with this conversation's browser logins."
         }
     }
 
@@ -348,6 +391,12 @@ struct SessionList: View {
         else if s.status == Status.running { ProgressView().controlSize(.small) }
         else if s.status == Status.queued { Image(systemName: "clock").foregroundStyle(.secondary) }
         else if s.status == Status.failed { Circle().fill(.red).frame(width: 10, height: 10) }
+        else if let mark = app.desktops.mark(s.id) {
+            Image(systemName: mark == .asleep ? "moon.fill" : "desktopcomputer")
+                .foregroundStyle(mark == .asleep ? .secondary : Color.blue)
+                .font(.caption)
+                .accessibilityLabel(mark == .asleep ? "Desktop asleep" : "Desktop running")
+        }
         else { Image(systemName: "bubble.left").foregroundStyle(.secondary) }
     }
 }

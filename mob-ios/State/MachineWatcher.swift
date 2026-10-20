@@ -14,6 +14,8 @@ protocol MachineEvents: AnyObject {
     func onQueue(_ m: Machine, _ queued: Int)
     /// mobd refused the token: the watcher has stopped.
     func onUnauthorized(_ m: Machine)
+    /// A conversation desktop, memory or disk change (Linux mobd).
+    func onDesktop(_ m: Machine, _ event: DesktopEvent)
 }
 
 /// Follows one machine's GET /events (session summaries) and remembers the last summary of
@@ -60,6 +62,8 @@ final class MachineWatcher {
                             if let data = e.data.data(using: .utf8), let q = try? APIClient.decoder.decode(QueueState.self, from: data) {
                                 events.onQueue(machine, q.queued?.count ?? 0)
                             }
+                        case "desktop", "memory", "disk":
+                            if let ev = DesktopEvent.parse(type: e.type, data: e.data) { events.onDesktop(machine, ev) }
                         case "reset":
                             Log.add("\(machine.name): events reset, refetching")
                             try await self.seed(client)

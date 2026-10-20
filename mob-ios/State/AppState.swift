@@ -41,6 +41,7 @@ final class AppState: MachineEvents {
 
     private(set) var apiClient: APIClient
     let chat = ChatStore()
+    let desktops = DesktopStore()
     /// One live view shared by the thumbnail and the full-screen view.
     let stream = StreamSession()
     let notifier = Notifier()
@@ -77,6 +78,7 @@ final class AppState: MachineEvents {
         apiClient = APIClient(baseURL: "", token: nil)
         if changed { saveMachines() }
         chat.onUnauthorized = { [weak self] id in self?.markNeedsPairing(id) }
+        chat.onOpen = { [weak self] in self?.followChat() }
         stream.onUnauthorized = { [weak self] in if let id = self?.activeMachineId { self?.markNeedsPairing(id) } }
         notifier.onOpen = { [weak self] m, s in self?.openChat(machine: m, session: s) }
         notifier.onAnswer = { [weak self] m, task, question, answer, approved in
@@ -104,6 +106,7 @@ final class AppState: MachineEvents {
         healthError = nil
         // An unpaired machine gets no requests until it is paired again.
         chat.attach(m == nil || m?.needsPairing == true ? nil : apiClient, machine: m?.id ?? "")
+        desktops.attach(m == nil || m?.needsPairing == true ? nil : apiClient)
         chat.live = m.map { liveMachines.contains($0.id) } ?? false
         healthTask?.cancel()
         healthTask = Task { [weak self] in
@@ -205,6 +208,8 @@ final class AppState: MachineEvents {
             health = h
             isConnected = h.ok
             healthError = nil
+            desktops.setEnabled(h.sessionDesktops)
+            if h.sessionDesktops && first { desktops.refresh() }
             // The live view waits for health to know whether mobd streams.
             if first, desktopUsers > 0, stream.state.status == .idle || stream.state.status == .error { connectDesktop() }
         } catch {
@@ -240,6 +245,11 @@ final class AppState: MachineEvents {
         guard let m = activeMachine, !m.needsPairing else { return stream.disconnect() }
         guard let health else { return } // connects when health arrives
         if !health.supports("stream") { return stream.unavailable("Update mobd on the office Mac to use the live desktop") }
+        let sessionId = health.sessionDesktops ? chat.currentId : nil
+        // Before the first turn a new chat has no desktop yet.
+        guard health.sessionDesktops == false || sessionId != nil else {
+            return stream.unavailable(noDesktopText)
+        }
         let quality = LiveQuality(rawValue: m.liveQuality ?? "") ?? .auto
         let w = Int(UIScreen.main.bounds.width * UIScreen.main.scale)
         let h = Int(UIScreen.main.bounds.height * UIScreen.main.scale)
@@ -247,7 +257,13 @@ final class AppState: MachineEvents {
         let id = m.id
         stream.onTransport = { [weak self] t in self?.rememberTransport(id, t) }
         stream.connect(client: apiClient, maxWidth: devicePixels(CGFloat(w), scale: 1), maxHeight: devicePixels(CGFloat(h), scale: 1),
-                       quality: quality, control: control, preferWebSocket: m.liveWebSocket == true)
+                       quality: quality, control: control, preferWebSocket: m.liveWebSocket == true, sessionId: sessionId)
+    }
+
+    /// The open chat changed; reconnect the live view to follow it (session desktops only).
+    private func followChat() {
+        guard health?.sessionDesktops == true, desktopUsers > 0 else { return }
+        connectDesktop(control: stream.state.control)
     }
 
     private func rememberTransport(_ id: String, _ t: LiveTransport) {
@@ -353,12 +369,26 @@ final class AppState: MachineEvents {
     }
 
     func onReset(_ m: Machine) {
-        if m.id == activeMachineId { chat.refreshAll() }
+        if m.id == activeMachineId { chat.refreshAll(); desktops.refresh() }
     }
 
     func onQueue(_ m: Machine, _ queued: Int) { self.queued[m.id] = queued }
 
     func onUnauthorized(_ m: Machine) { markNeedsPairing(m.id) }
+
+    func onDesktop(_ m: Machine, _ event: DesktopEvent) {
+        guard m.id == activeMachineId else { return }
+        let before = (event as? DesktopEvent).flatMap { ev in
+            if case .desktop(let info) = ev { return desktops.desktops[info.sessionId]?.state }
+            return nil
+        }
+        desktops.apply(event)
+        // A desktop that just became running: if it's the current chat and the stream is idle/error, reconnect.
+        if case .desktop(let info) = event, info.sessionId == chat.currentId, info.state == "running", before != "running" {
+            let s = stream.state.status
+            if desktopUsers > 0 && (s == .idle || s == .error) { connectDesktop(control: stream.state.control) }
+        }
+    }
 
     func onLive(_ m: Machine, _ live: Bool) {
         if live { liveMachines.insert(m.id) } else { liveMachines.remove(m.id) }
@@ -366,7 +396,7 @@ final class AppState: MachineEvents {
         let was = chat.live
         chat.live = live
         // Reconnected: catch up on whatever happened while the stream was down.
-        if live && !was { chat.refreshAll() }
+        if live && !was { chat.refreshAll(); desktops.refresh() }
     }
 
     /// Background refresh: iOS gives no long-lived connections in the background, so compare

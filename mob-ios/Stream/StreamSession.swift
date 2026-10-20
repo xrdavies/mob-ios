@@ -58,6 +58,8 @@ final class StreamSession {
     @ObservationIgnored private var startWs: ((Bool) -> Void)?
     @ObservationIgnored private var graceTask: Task<Void, Never>?
     @ObservationIgnored private var lastRtt: Int?
+    /// The conversation's session ID (mobd with sessionDesktops); nil for a shared desktop (macOS).
+    @ObservationIgnored private(set) var sessionId: String?
     /// The size the session was opened or last resized at, in pixels.
     @ObservationIgnored private(set) var size = (width: 0, height: 0)
 
@@ -84,10 +86,11 @@ final class StreamSession {
 
     /// Opens a session sized to the view (pixels); `control` takes control once the picture arrives.
     /// `preferWebSocket`: the WebSocket carried this machine's last session; race it after 1 s.
-    func connect(client: APIClient, maxWidth: Int, maxHeight: Int, quality: LiveQuality, control: Bool = false, preferWebSocket: Bool = false) {
+    func connect(client: APIClient, maxWidth: Int, maxHeight: Int, quality: LiveQuality, control: Bool = false, preferWebSocket: Bool = false, sessionId: String? = nil) {
         disconnect()
         attempt += 1
         let a = attempt
+        self.sessionId = sessionId
         takeControl = control
         started = Date()
         frames = 0
@@ -145,7 +148,7 @@ final class StreamSession {
             guard attempt == a else { return }
             var sdpOffer = pc.localDescription?.sdp ?? offer.sdp
             if blockWebRTC { sdpOffer = withoutCandidates(sdpOffer) }
-            let answer = try await client.openStream(offer: sdpOffer, maxWidth: maxWidth, maxHeight: maxHeight, quality: quality.rawValue)
+            let answer = try await client.openStream(offer: sdpOffer, maxWidth: maxWidth, maxHeight: maxHeight, quality: quality.rawValue, sessionId: sessionId)
             guard attempt == a else { return client.closeStream(answer.session) }
             session = (client, answer.session)
             Log.add("live view: answered in \(ms()) ms, \(answer.width)×\(answer.height)")
@@ -163,6 +166,7 @@ final class StreamSession {
             }
         } catch {
             if error.isUnauthorized { onUnauthorized?() }
+            if let msg = streamErrorText(error) { return fail(a, msg) }
             let status = (error as? APIError)?.status
             fail(a, status == 404 || status == 405 ? "Update mobd on the office Mac to use the live desktop" : readable(error))
         }
@@ -356,6 +360,7 @@ final class StreamSession {
         via = nil
         transport = nil
         lastRtt = nil
+        sessionId = nil
         if let s = session { s.client.closeStream(s.id) }
         session = nil
         readout = nil

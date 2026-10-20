@@ -31,6 +31,8 @@ final class ChatStore {
     @ObservationIgnored var live = false
     /// mobd refused the token of this machine; AppState marks it for pairing and detaches.
     @ObservationIgnored var onUnauthorized: ((String) -> Void)?
+    /// Another conversation (or a new chat) was opened; the live view follows it on Linux mobd.
+    @ObservationIgnored var onOpen: (() -> Void)?
 
     @ObservationIgnored private var api: APIClient?
     @ObservationIgnored private var machineId = ""
@@ -112,7 +114,9 @@ final class ChatStore {
 
     /// Opens a conversation; nil starts a new chat.
     func open(_ id: String?) {
+        let changed = id != currentId
         currentId = id
+        defer { if changed { onOpen?() } }
         detail = nil
         cancelling = false
         UserDefaults.standard.set(id, forKey: key)
