@@ -164,6 +164,8 @@ final class StreamTests: XCTestCase {
         XCTAssertTrue(text.contains("LAN"))
         let still = Readout(transport: "WebRTC", kBps: 0, fps: 0, network: .lan, rttMs: 15)
         XCTAssertEqual(readoutText(width: 1408, height: 792, still), "1408×792 · Idle · WebRTC · LAN")
+        let trickle = Readout(transport: "WebRTC", kBps: 0, fps: 4, network: .lan, rttMs: 15)
+        XCTAssertEqual(readoutText(width: 1408, height: 792, trickle), "1408×792 · Idle · WebRTC · LAN")
     }
 
     func testSignalBars() {
