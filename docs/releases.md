@@ -4,7 +4,7 @@
 标注说明：
 
 - **【现有】**：仓库中已有并核对过的设置（`mob-ios.xcodeproj`、`Info.plist`）。
-- **【待建】**：尚未配置。仓库有 `make archive`、`ExportOptions.plist` 和隐私清单
+- **【待建】**：尚未配置。仓库有 `make release`、`make archive`、`ExportOptions.plist` 和隐私清单
   （`PrivacyInfo.xcprivacy`），但**没有**发布工作流、`DEVELOPMENT_TEAM` 或 entitlements 文件；
   也无法从仓库确认 App Store Connect 上是否已有应用记录。
 
@@ -147,13 +147,14 @@ Apple 的「收集」指开发者或第三方获取数据；数据只到用户�
 ### 1. 版本号规则
 
 - `MARKETING_VERSION`（CFBundleShortVersionString）：`X.Y.Z`，与 git 标签 `vX.Y.Z` 一致。
-- `CURRENT_PROJECT_VERSION`（CFBundleVersion）：每次上传都必须比同版本之前的构建大。
-  建议沿用 Android 公式 `MAJOR × 1000000 + MINOR × 1000 + PATCH`（0.1.0 → `1000`），同一版本
-  需重新上传时追加后缀（`1000.1`、`1000.2`）。两端版本对应关系一目了然。
+- `CURRENT_PROJECT_VERSION`（CFBundleVersion）：与 Android 相同的公式
+  `MAJOR × 1000000 + MINOR × 1000 + PATCH`（0.1.0 → `1000`）。同一版本需要重新上传时，用
+  `make archive … BUILD=1000.1`（`1000.2`…）在命令行覆盖。
+- 两者都由 `make release` 写入工程文件并提交，不再手改。
 
 ### 2. 发布前
 
-1. 要发布的提交已推送到 `main`，工作区干净。
+1. 要发布的改动已推送到 `main`，工作区干净。
 2. 测试通过：
 
    ```bash
@@ -165,33 +166,33 @@ Apple 的「收集」指开发者或第三方获取数据；数据只到用户�
    手动走一遍配对、发任务、通知、实时桌面。
 3. 写好面向用户的「此版本的新增内容」（中文，无私有 PR 链接）。
 
-### 3. Archive 并上传
-
-在干净的工作区运行（不修改工程文件；`build/` 已在 `.gitignore`）：
+### 3. 提交版本并打标签
 
 ```bash
-make archive VERSION=0.1.0 BUILD=1000 TEAM=<TEAM_ID>
+make release VERSION=v0.1.0
 ```
 
-它以命令行覆盖版本号和 Team 执行 `xcodebuild archive`，再用仓库中的 `ExportOptions.plist`
-（`app-store-connect`、`upload`、自动签名）导出并上传到 App Store Connect。
+`.github/release/tag.mjs` 先检查：在 `main` 上、工作区干净、与 `origin/main` 一致、版本高于已有
+标签。然后把 `MARKETING_VERSION` 和 `CURRENT_PROJECT_VERSION` 写进 `project.pbxproj`，提交
+`chore(release): v0.1.0`，在该提交上打附注标签，并用 `git push --atomic` 同时推送 `main` 和标签。
+推送被拒时两者都不会到达 GitHub，本地提交和标签保留，按提示重试。
+
+### 4. Archive 并上传
+
+在刚打标签的提交上（工作区干净；`build/` 已在 `.gitignore`）：
+
+```bash
+make archive TEAM=<TEAM_ID>
+```
+
+`HEAD` 不是发布标签时会拒绝运行。它用工程中的版本号执行 `xcodebuild archive`，再用仓库中的
+`ExportOptions.plist`（`app-store-connect`、`upload`、自动签名）导出并上传到 App Store Connect。
 
 或在 Xcode：选择 **Any iOS Device** → Product → Archive → Organizer → Distribute App →
-App Store Connect → Upload（此方式使用工程中的版本号，需先改并提交）。
+App Store Connect → Upload（同样使用工程中的版本号）。
 
 上传后 App Store Connect 处理约 5–30 分钟，期间可能发来 ITMS 警告邮件（隐私清单、权限说明等），
 逐条处理。保留 `build/mob-ios.xcarchive`（含 dSYM）直到下一版本，用于符号化崩溃日志。
-
-### 4. 打标签
-
-上传成功后，在上传的提交上打附注标签并只推送该标签：
-
-```bash
-git tag -a v$VERSION -m "mob-ios v$VERSION (build $BUILD)"
-git -c push.followTags=false push origin refs/tags/v$VERSION:refs/tags/v$VERSION
-```
-
-仓库没有 `tag.mjs`，不会自动检查分支和版本回退；手动确认 `git status` 干净且 `HEAD` 等于 `origin/main`。
 
 ### 5. TestFlight
 
@@ -230,9 +231,8 @@ git -c push.followTags=false push origin refs/tags/v$VERSION:refs/tags/v$VERSION
 ## 五、发布清单（每次）
 
 - [ ] `main` 已推送，单元测试通过，真机手测通过。
-- [ ] 确定 `VERSION` 与 `BUILD`，高于上一次上传。
-- [ ] Archive + 上传成功；处理 ITMS 警告邮件。
-- [ ] 打 `vX.Y.Z` 标签并推送。
+- [ ] `make release VERSION=vX.Y.Z`：版本提交和标签已推送。
+- [ ] `make archive TEAM=…` 上传成功；处理 ITMS 警告邮件。
 - [ ] TestFlight 内部测试通过（iPhone + iPad）。
 - [ ] 新版本页：构建、更新说明、截图、审核备注。
 - [ ] 提交审核，选手动发布 + 分阶段发布。
@@ -251,7 +251,7 @@ git -c push.followTags=false push origin refs/tags/v$VERSION:refs/tags/v$VERSION
 参考 mob-android：推送 `vX.Y.Z` 标签 → GitHub Actions（macOS runner）构建并上传 TestFlight，
 审核提交和发布仍手动。
 
-1. 新增 `.github/release/tag.mjs`（可从 mob-android 复制）和 `Makefile` 的 `release` 目标。
+1. `make release` 已有；CI 只需在标签推送时运行 `make archive`。
 2. App Store Connect → 用户和访问 → 集成 → App Store Connect API 创建密钥（App Manager 角色），
    下载 `.p8`（只能下载一次，离线备份）。
 3. `release` 环境配置（名称待定）：
