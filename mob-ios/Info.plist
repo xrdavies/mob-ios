@@ -24,6 +24,10 @@
 	<string>Scan the pairing QR code shown by mobd link.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>mob connects to mobd on your office Mac over your local network.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>mob does not record audio; the live desktop's WebRTC library declares microphone access.</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>
@@ -36,6 +40,13 @@
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>

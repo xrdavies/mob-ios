@@ -30,9 +30,9 @@ CI 自动化见第六节（提议）。
 | ATS | `NSAllowsArbitraryLoads = true`（mobd 可在局域网用 HTTP） | `Info.plist` |
 | 方向 | 竖屏、左横屏、右横屏（无倒竖） | `UISupportedInterfaceOrientations` |
 
-官网（`../mob-site`）：构建变量 `IOS_APP_URL`（只接受 `apps.apple.com` 或
-`testflight.apple.com`）设置后，下载页 iOS 卡片显示按钮；未设置时显示「即将推出」。
-首页和快速开始页的「iPhone 版即将上线」是写死的文案，上架后需改官网代码。
+官网（`../mob-site`）：仓库变量 `IOS_APP_URL`（只接受 `apps.apple.com` 或
+`testflight.apple.com`）设置后，下载页 iOS 卡片显示按钮（TestFlight 链接显示「通过 TestFlight 获取」）；
+未设置时显示「即将推出」。设置后重新运行官网的 Pages 工作流。
 
 ## 一、一次性准备【待建】
 
@@ -78,9 +78,9 @@ App Store Connect → 我的 App → 新建 App：
 - **TestFlight**：内部测试组（App Store Connect 用户，最多 100 人，无需审核）；
   需要外部测试时建外部组（首个构建需 Beta 审核，可生成公开链接 `testflight.apple.com/join/…`）。
 
-### 4. 上架前必须处理的工程问题（代码改动，未做）
+### 4. 上架前的工程问题（已处理）
 
-以下各项会改工程或代码，不在本文档范围内执行，但第一次上传前需决定并完成：
+以下各项已在工程中完成，记录原因供以后参考：
 
 1. **隐私清单**：代码使用 `UserDefaults`（`AppState.swift`、`ChatStore.swift`），属于 Apple
    「需声明理由的 API」。没有 `PrivacyInfo.xcprivacy` 时上传会收到 ITMS-91053 警告/拒绝。
@@ -167,28 +167,14 @@ Apple 的「收集」指开发者或第三方获取数据；数据只到用户�
 
 ### 3. Archive 并上传
 
-命令行（不修改工程文件；`build/` 已在 `.gitignore`）：
+在干净的工作区运行（不修改工程文件；`build/` 已在 `.gitignore`）：
 
 ```bash
-VERSION=0.1.0 BUILD=1000 TEAM=<TEAM_ID>
-xcodebuild -project mob-ios.xcodeproj -scheme mob-ios -configuration Release \
-  -destination 'generic/platform=iOS' -archivePath build/mob-ios.xcarchive \
-  DEVELOPMENT_TEAM=$TEAM MARKETING_VERSION=$VERSION CURRENT_PROJECT_VERSION=$BUILD \
-  -allowProvisioningUpdates archive
-
-cat > /tmp/ExportOptions.plist <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>method</key><string>app-store-connect</string>
-  <key>destination</key><string>upload</string>
-  <key>teamID</key><string>$TEAM</string>
-  <key>signingStyle</key><string>automatic</string>
-</dict></plist>
-EOF
-xcodebuild -exportArchive -archivePath build/mob-ios.xcarchive \
-  -exportOptionsPlist /tmp/ExportOptions.plist -exportPath build/export -allowProvisioningUpdates
+make archive VERSION=0.1.0 BUILD=1000 TEAM=<TEAM_ID>
 ```
+
+它以命令行覆盖版本号和 Team 执行 `xcodebuild archive`，再用仓库中的 `ExportOptions.plist`
+（`app-store-connect`、`upload`、自动签名）导出并上传到 App Store Connect。
 
 或在 Xcode：选择 **Any iOS Device** → Product → Archive → Organizer → Distribute App →
 App Store Connect → Upload（此方式使用工程中的版本号，需先改并提交）。
@@ -227,8 +213,8 @@ git -c push.followTags=false push origin refs/tags/v$VERSION:refs/tags/v$VERSION
 
 - [ ] App Store 页面可见、版本号正确，在未安装 TestFlight 的设备上能搜索并安装。
 - [ ] 从上一 App Store 版本更新后，机器列表和配对凭据（Keychain）保留。
-- [ ] 首次上架：在 `mob-site` 的 `production` 环境设置 `IOS_APP_URL=https://apps.apple.com/app/id<APP_ID>`
-  并重建官网；修改首页/快速开始页写死的「即将上线」文案。
+- [ ] 首次上架：在 `mob-site` 的仓库变量设置 `IOS_APP_URL=https://apps.apple.com/app/id<APP_ID>`
+  并重建官网。
 - [ ] Xcode Organizer → Crashes / App Store Connect → TestFlight 与「指标」观察崩溃。
 
 ## 四、回滚与热修复
@@ -258,7 +244,7 @@ git -c push.followTags=false push origin refs/tags/v$VERSION:refs/tags/v$VERSION
 - [ ] App Store Connect 记录、隐私政策 URL、隐私标签、年龄分级、价格与地区。
 - [ ] 第一节第 4 项的工程问题已处理（隐私清单、出口合规键、麦克风说明、iPad 方向）。
 - [ ] 审核用演示 mobd 已就绪。
-- [ ] 官网 `IOS_APP_URL` 和写死的文案已更新。
+- [ ] 官网 `IOS_APP_URL` 已更新。
 
 ## 六、CI 自动化（提议，未实现）
 
