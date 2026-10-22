@@ -71,8 +71,10 @@ struct ChatView: View {
                     Button {
                         withAnimation { app.showDesktopDrawer.toggle() }
                     } label: {
-                        Image(systemName: app.showDesktopDrawer ? "desktopcomputer.trianglebadge.exclamationmark" : "desktopcomputer")
-                            .symbolRenderingMode(.hierarchical)
+                        // Shown: the same icon, highlighted (a badged symbol read as a warning).
+                        Image(systemName: "desktopcomputer")
+                            .padding(5)
+                            .background(app.showDesktopDrawer ? Color.accentColor.opacity(0.15) : .clear, in: Circle())
                     }
                     .disabled(app.activeMachine == nil)
                     .accessibilityLabel(app.showDesktopDrawer ? "Hide desktop" : "Show desktop")
