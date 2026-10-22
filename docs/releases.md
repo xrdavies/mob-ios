@@ -8,19 +8,19 @@
   （`PrivacyInfo.xcprivacy`），但**没有**发布工作流、`DEVELOPMENT_TEAM` 或 entitlements 文件；
   也无法从仓库确认 App Store Connect 上是否已有应用记录。
 
-当前可行的发布路径是手动：Xcode Archive → 上传 App Store Connect → TestFlight → App Store。
-CI 自动化见第六节（提议）。
+发布目标是 **App Store**。路径（手动）：`make release` → `make archive` 上传 App Store Connect →
+TestFlight 内部验证 → 提交 App Store 审核 → 发布。CI 自动化见第六节（提议）。
 
 ## 项目现状【现有】
 
 | 项 | 值 | 位置 |
 | --- | --- | --- |
 | Bundle ID | `com.xrdavies.mob-ios` | `PRODUCT_BUNDLE_IDENTIFIER` |
-| 显示名称 | `mob` | `CFBundleDisplayName` |
+| 显示名称 | `Mob` | `CFBundleDisplayName` |
 | 最低系统 | iOS / iPadOS 17.0 | `IPHONEOS_DEPLOYMENT_TARGET` |
 | 设备 | iPhone + iPad | `TARGETED_DEVICE_FAMILY = "1,2"` |
 | 签名 | Automatic，**未设置 Team** | `CODE_SIGN_STYLE`，无 `DEVELOPMENT_TEAM` |
-| 版本 | `MARKETING_VERSION = 0.1.0`，`CURRENT_PROJECT_VERSION = 1`（写死在工程中） | target build settings |
+| 版本 | `MARKETING_VERSION`、`CURRENT_PROJECT_VERSION`，由 `make release` 写入并提交（0.1.0 → 构建号 `1000`） | target build settings |
 | Archive 配置 | Release | `mob-ios.xcscheme` |
 | 依赖 | `stasel/WebRTC` 155.0.0（SPM 二进制） | `Package.resolved` |
 | 后台 | `UIBackgroundModes = fetch`，任务 ID `com.xrdavies.mob-ios.refresh` | `Info.plist`、`App/MobApp.swift` |
@@ -28,11 +28,13 @@ CI 自动化见第六节（提议）。
 | 相机 | `NSCameraUsageDescription`：扫描 `mobd link` 二维码 | `Info.plist` |
 | 本地网络 | `NSLocalNetworkUsageDescription` | `Info.plist` |
 | ATS | `NSAllowsArbitraryLoads = true`（mobd 可在局域网用 HTTP） | `Info.plist` |
-| 方向 | 竖屏、左横屏、右横屏（无倒竖） | `UISupportedInterfaceOrientations` |
+| 方向 | iPhone：竖屏、左横屏、右横屏；iPad：四个方向 | `UISupportedInterfaceOrientations`、`~ipad` |
+| 隐私清单 | UserDefaults（`CA92.1`），无跟踪、不收集数据 | `PrivacyInfo.xcprivacy` |
+| 出口合规 | `ITSAppUsesNonExemptEncryption = NO` | `Info.plist` |
 
-官网（`../mob-site`）：仓库变量 `IOS_APP_URL`（只接受 `apps.apple.com` 或
-`testflight.apple.com`）设置后，下载页 iOS 卡片显示按钮（TestFlight 链接显示「通过 TestFlight 获取」）；
-未设置时显示「即将推出」。设置后重新运行官网的 Pages 工作流。
+官网（`../mob-site`，https://mob.0xd.app ）：仓库变量 `IOS_APP_URL`（只接受 `apps.apple.com` 或
+`testflight.apple.com`）设置后，下载页 iPhone 卡片显示 “Get it on the App Store”（TestFlight 链接显示
+“Join on TestFlight”）；未设置时显示 “Coming to the App Store”。设置后重新运行官网的 Pages 工作流。
 
 ## 一、一次性准备【待建】
 
@@ -43,7 +45,7 @@ CI 自动化见第六节（提议）。
 2. 决定 Team ID 的放置方式：
    - 写入工程（`DEVELOPMENT_TEAM = <TEAM_ID>`，Xcode → target → Signing & Capabilities 选择 Team 后提交）。
      开源仓库公开 Team ID 没有安全风险，但 fork 的贡献者需改成自己的 Team。
-   - 或不提交，Archive 时在命令行传入 `DEVELOPMENT_TEAM=<TEAM_ID>`（第三节的命令采用此方式）。
+   - 或不提交，Archive 时在命令行传入（`make archive TEAM=<TEAM_ID>`，第三节采用此方式）。
 3. 在 Xcode → Settings → Accounts 登录该账号。
 
 ### 2. Bundle ID、证书、描述文件
@@ -65,15 +67,15 @@ App Store Connect → 我的 App → 新建 App：
 | 字段 | 值 |
 | --- | --- |
 | 平台 | iOS |
-| 名称 | <APP_STORE_NAME>（「mob」可能已被占用，需准备备选） |
-| 主要语言 | 简体中文（或 <PRIMARY_LANGUAGE>） |
+| 名称 | `Mob`（可能已被占用；备选如 `Mob – Remote Coding Agents`） |
+| 主要语言 | English (U.S.)（应用界面和官网都是英文） |
 | Bundle ID | `com.xrdavies.mob-ios` |
 | SKU | 自定，如 `mob-ios` |
 
 之后补齐：
 
 - **App 信息**：类别「效率」或「开发者工具」；内容版权；年龄分级问卷。
-- **App 隐私**：隐私政策 URL `<PRIVACY_POLICY_URL>`（必填）；隐私标签见第二节。
+- **App 隐私**：隐私政策 URL `https://mob.0xd.app/privacy/`（必填）；隐私标签见第二节。
 - **价格与销售范围**：免费；销售地区。中国大陆上架需要 ICP 备案号（视地区决定）。
 - **TestFlight**：内部测试组（App Store Connect 用户，最多 100 人，无需审核）；
   需要外部测试时建外部组（首个构建需 Beta 审核，可生成公开链接 `testflight.apple.com/join/…`）。
@@ -82,21 +84,15 @@ App Store Connect → 我的 App → 新建 App：
 
 以下各项已在工程中完成，记录原因供以后参考：
 
-1. **隐私清单**：代码使用 `UserDefaults`（`AppState.swift`、`ChatStore.swift`），属于 Apple
-   「需声明理由的 API」。没有 `PrivacyInfo.xcprivacy` 时上传会收到 ITMS-91053 警告/拒绝。
-   新增 `mob-ios/PrivacyInfo.xcprivacy`，声明 `NSPrivacyAccessedAPICategoryUserDefaults`，理由 `CA92.1`，
-   `NSPrivacyTracking = false`，`NSPrivacyCollectedDataTypes` 按第二节填写。
-   同时检查 `WebRTC.xcframework` 是否自带隐私清单。
-2. **麦克风说明**：WebRTC 二进制引用了音频采集 API，上传后可能收到缺少
-   `NSMicrophoneUsageDescription` 的 ITMS-90683 提示（README 已列为待查项）。收到时补充说明文字，
-   内容如实说明应用不录音。
-3. **出口合规**：未设置 `ITSAppUsesNonExemptEncryption`，每个构建都会在 App Store Connect 询问。
-   应用使用 HTTPS（系统）以及 WebRTC 内置的 DTLS-SRTP（BoringSSL）。由所有者确认归类后，在
-   `Info.plist` 设置该键，免去每次询问（见第二节）。
-4. **iPad 多任务方向**：iPad 未声明倒竖方向且未设 `UIRequiresFullScreen`。若上传校验报
-   多任务方向错误，为 iPad 补齐四个方向（`UISupportedInterfaceOrientations~ipad`）。
-5. **版本号**：`MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` 写死在工程。本文第三节在命令行
-   覆盖；若改用 Xcode GUI Archive，需要先在工程中改版本并提交。
+1. **隐私清单**：代码使用 `UserDefaults`，属于 Apple「需声明理由的 API」，缺少时上传会收到
+   ITMS-91053。`mob-ios/PrivacyInfo.xcprivacy` 声明 `NSPrivacyAccessedAPICategoryUserDefaults`（`CA92.1`），
+   `NSPrivacyTracking = false`，不收集数据。上传后若提示 `WebRTC.xcframework` 缺少隐私清单，再处理。
+2. **麦克风说明**：WebRTC 二进制引用了音频采集 API（ITMS-90683）。已设 `NSMicrophoneUsageDescription`，
+   如实说明应用不录音。
+3. **出口合规**：只使用 HTTPS（系统）和 WebRTC 的 DTLS-SRTP，属于豁免加密；`Info.plist` 已设
+   `ITSAppUsesNonExemptEncryption = NO`，App Store Connect 不再逐个构建询问（见第二节）。
+4. **iPad 多任务方向**：已为 iPad 声明四个方向（`UISupportedInterfaceOrientations~ipad`），避免 ITMS-90474。
+5. **版本号**：由 `make release` 写入工程并提交，Xcode GUI 和 `make archive` 使用同一版本。
 
 ## 二、商店审核与合规要点
 
@@ -111,17 +107,17 @@ Apple 的「收集」指开发者或第三方获取数据；数据只到用户�
 | 键 | 当前文字 | 状态 |
 | --- | --- | --- |
 | `NSCameraUsageDescription` | Scan the pairing QR code shown by mobd link. | 【现有】 |
-| `NSLocalNetworkUsageDescription` | mob connects to mobd on your office Mac over your local network. | 【现有】 |
-| `NSMicrophoneUsageDescription` | mob does not record audio; the live desktop's WebRTC library declares microphone access. | 【现有】 |
+| `NSLocalNetworkUsageDescription` | mob connects to mobd on your office Mac over your local network. | 【现有】；待改为 “Mob connects …” |
+| `NSMicrophoneUsageDescription` | Mob does not record audio; the live desktop's WebRTC library declares microphone access. | 【现有】 |
 | 照片 | 无需；`PhotosPicker` 不要求权限 | — |
 
-说明文字目前只有英文；如果商店主要语言为中文，可增加 `InfoPlist.strings` 本地化（可选）。
+说明文字为英文，与商店主要语言一致；以后支持中文时增加 `InfoPlist.strings` 本地化。
 
 ### 出口合规（加密）
 
 上传后 App Store Connect 询问是否使用加密。应用使用标准协议（HTTPS、WebRTC 的 DTLS-SRTP），
-不实现专有加密算法。常见做法是选择使用了豁免加密，并在 `Info.plist` 设置
-`ITSAppUsesNonExemptEncryption = NO`。是否需要提交其他文件取决于所有者所在地区和法规，**需所有者确认**。
+不实现专有加密算法，属于豁免加密，`Info.plist` 已设 `ITSAppUsesNonExemptEncryption = NO`。
+是否需要提交其他文件（如法国的加密申报）取决于销售地区，**需所有者确认**。
 
 ### 通知与后台
 
@@ -130,17 +126,19 @@ Apple 的「收集」指开发者或第三方获取数据；数据只到用户�
 
 ### App Review 注意事项
 
-- **审核需要可用的 mobd**（准则 2.1）。没有配对的电脑应用无法演示。准备一台可从公网访问的演示
-  mobd（如 Tailscale Funnel / HTTPS 网关）和配对链接，写入「App 审核信息 → 备注」，或提供演示视频。
-  决定方式：<REVIEW_ACCESS>。
+- **审核需要看到应用工作**（准则 2.1）。没有配对的电脑应用无法演示。**采用演示视频**：录制完整流程
+  （在电脑上 `mobd link` → 手机扫码配对 → 发任务 → 回答问题 → 实时桌面与控制），上传到可公开访问的
+  地址，在「App 审核信息 → 备注」中给出链接，并说明 mobd 是用户在自己电脑上运行的服务端
+  （https://mob.0xd.app/start/ ）。审核员仍要求实机时，再准备可从公网访问的演示 mobd。
 - **ATS 例外**：`NSAllowsArbitraryLoads` 用于连接用户局域网里的 mobd（HTTP），在审核备注中说明。
 - 远程控制桌面：在说明中写明只控制用户自己的电脑，需在电脑端用 `mobd link` 配对授权。
 
 ### 商店素材
 
-- 截图：iPhone 6.9″（或 6.5″）必需；因支持 iPad，iPad 13″ 截图也必需。
+- 截图：iPhone 6.9″（1320×2868）必需；因支持 iPad，iPad 13″（2064×2752）也必需。界面和演示对话用
+  英文，不含个人数据；首次上架前需重新拍摄（现有截图为中文演示对话）。
 - 图标 1024×1024 已在 `Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png`（需无透明通道）。
-- 副标题、描述、关键词、支持 URL（<SUPPORT_URL>）、营销 URL（可选，官网）。
+- 副标题、描述、关键词（英文）；支持 URL `https://mob.0xd.app/start/`（联系邮箱 mob@taoist.dev）；营销 URL `https://mob.0xd.app/`。
 
 ## 三、每次发布（手动）
 
@@ -158,13 +156,13 @@ Apple 的「收集」指开发者或第三方获取数据；数据只到用户�
 2. 测试通过：
 
    ```bash
-   xcodebuild -project mob-ios.xcodeproj -scheme mob-ios \
-     -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
+   make test            # 单元测试
+   make release-test    # 发布脚本测试
    ```
 
    `LiveStreamTests` 需要 `MOBD_URL`、`MOBD_TOKEN`，UI 测试需要模拟器里已配对的机器；发布前在真机
    手动走一遍配对、发任务、通知、实时桌面。
-3. 写好面向用户的「此版本的新增内容」（中文，无私有 PR 链接）。
+3. 写好面向用户的「此版本的新增内容」（英文，无私有 PR 链接）。
 
 ### 3. 提交版本并打标签
 
@@ -175,7 +173,8 @@ make release VERSION=v0.1.0
 `.github/release/tag.mjs` 先检查：在 `main` 上、工作区干净、与 `origin/main` 一致、版本高于已有
 标签。然后把 `MARKETING_VERSION` 和 `CURRENT_PROJECT_VERSION` 写进 `project.pbxproj`，提交
 `chore(release): v0.1.0`，在该提交上打附注标签，并用 `git push --atomic` 同时推送 `main` 和标签。
-推送被拒时两者都不会到达 GitHub，本地提交和标签保留，按提示重试。
+推送被拒时两者都不会到达 GitHub，本地提交和标签保留，按提示重试；若远端 `main` 已有新提交，
+`git tag -d vX.Y.Z && git reset --hard origin/main` 后重新运行 `make release`。
 
 ### 4. Archive 并上传
 
@@ -243,7 +242,8 @@ App Store Connect → Upload（同样使用工程中的版本号）。
 - [ ] Team ID、App ID、Distribution 证书（已备份 `.p12`）。
 - [ ] App Store Connect 记录、隐私政策 URL、隐私标签、年龄分级、价格与地区。
 - [ ] 第一节第 4 项的工程问题已处理（隐私清单、出口合规键、麦克风说明、iPad 方向）。
-- [ ] 审核用演示 mobd 已就绪。
+- [ ] 审核用演示视频已上传，链接写入审核备注。
+- [ ] 英文商店截图（iPhone 6.9″、iPad 13″）和描述已上传。
 - [ ] 官网 `IOS_APP_URL` 已更新。
 
 ## 六、CI 自动化（提议，未实现）
@@ -264,5 +264,5 @@ App Store Connect → Upload（同样使用工程中的版本号）。
 
 4. 工作流按第三节的命令执行，追加
    `-authenticationKeyPath … -authenticationKeyID … -authenticationKeyIssuerID …`
-   让 Xcode 云签名（无需导入 `.p12`）；版本和构建号从标签计算后在命令行传入。
+   让 Xcode 云签名（无需导入 `.p12`）；版本和构建号直接来自 `make release` 提交的工程文件。
 5. 上传后创建 GitHub Release 记录（不附 IPA）。
