@@ -242,10 +242,11 @@ func readStats(_ report: [String: (type: String, values: [String: Any])], prev: 
     return (sample, r)
 }
 
-/// "1408×792 · 30 fps · 380 kB/s · WebRTC · LAN".
+/// "1408×792 · 30 fps · 380 kB/s · WebRTC · LAN"; "Idle" instead of the rate when no new frame
+/// arrived (a still screen sends almost nothing).
 func readoutText(width: Int, height: Int, _ r: Readout?) -> String {
     var parts = ["\(width)×\(height)"]
-    if let r { parts += ["\(r.fps) fps", "\(r.kBps) kB/s", r.transport] }
+    if let r { parts += (r.fps == 0 ? ["Idle"] : ["\(r.fps) fps", "\(r.kBps) kB/s"]) + [r.transport] }
     if let n = r?.network { parts.append(n.rawValue) }
     return parts.joined(separator: " · ")
 }
