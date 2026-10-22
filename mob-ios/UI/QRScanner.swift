@@ -34,7 +34,7 @@ struct QRScannerSheet: View {
                     ProgressView().tint(.white)
                 default:
                     VStack(spacing: 12) {
-                        message("mob cannot use the camera. Allow it in Settings, or paste the link instead.")
+                        message("Mob cannot use the camera. Allow it in Settings, or paste the link instead.")
                         Button("Open Settings") { openURL(URL(string: UIApplication.openSettingsURLString)!) }
                             .buttonStyle(.borderedProminent)
                     }

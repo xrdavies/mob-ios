@@ -11,7 +11,7 @@ enum Acknowledgements {
         var id: String { name }
     }
 
-    static let mob = Item(name: "mob-ios", license: "MIT", url: "https://github.com/xrdavies/mob-ios", text: """
+    static let mob = Item(name: "Mob for iOS", license: "MIT", url: "https://github.com/xrdavies/mob-ios", text: """
 MIT License
 
 Copyright (c) 2026 Frozen and MOB contributors

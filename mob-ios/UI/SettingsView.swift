@@ -58,7 +58,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Notifications")
                 } footer: {
-                    Text("mob notifies you when the agent asks something or a task finishes, on every office Mac in the list. While mob is open this is immediate. In the background iOS does not allow a live connection, so mob checks when iOS lets it refresh, usually every 15 minutes or more.")
+                    Text("Mob notifies you when the agent asks something or a task finishes, on every office Mac in the list. While Mob is open this is immediate. In the background iOS does not allow a live connection, so Mob checks when iOS lets it refresh, usually every 15 minutes or more.")
                 }
                 Section {
                     NavigationLink("Log") { LogView() }
@@ -66,7 +66,7 @@ struct SettingsView: View {
                     Text("Connections, event streams, live view and errors, for troubleshooting.")
                 }
                 Section("About") {
-                    LabeledContent("mob-ios", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")
+                    LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")
                     NavigationLink("Acknowledgements") { AcknowledgementsView() }
                 }
             }

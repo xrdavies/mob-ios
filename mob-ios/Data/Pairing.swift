@@ -37,7 +37,7 @@ struct PairLink: Equatable {
             params[key] = value
         }
         guard let v = params["v"] else { throw PairError(message: "The link is incomplete: v is missing") }
-        guard v == "1" else { throw PairError(message: "This link needs a newer version of mob") }
+        guard v == "1" else { throw PairError(message: "This link needs a newer version of Mob") }
         guard let invite = params["invite"], !invite.isEmpty else { throw PairError(message: "The link is incomplete: invite is missing") }
         guard let serverId = params["serverId"], !serverId.isEmpty else { throw PairError(message: "The link is incomplete: serverId is missing") }
 

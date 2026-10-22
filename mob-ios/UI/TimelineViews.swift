@@ -20,13 +20,16 @@ struct TimelineRow: View {
             Label(queuedLabel(t), systemImage: "clock")
                 .font(.caption).foregroundStyle(.secondary).padding(.leading, 34)
         case .working(_, _, let latest, let waiting):
-            HStack(spacing: 8) {
-                if waiting { Circle().fill(Color.waiting).frame(width: 8, height: 8) } else { ProgressView().controlSize(.mini) }
-                Text(waiting ? "Waiting for your answer" : latest.map { "Working · \($0.title)" } ?? "Working…")
-                    .font(.caption).lineLimit(1)
-                    .foregroundStyle(waiting ? Color.waiting : Color.accentColor)
+            // While a question waits, the composer's status line already says so.
+            if !waiting {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.mini)
+                    Text(latest.map { "Working · \($0.title)" } ?? "Working…")
+                        .font(.caption).lineLimit(1)
+                        .foregroundStyle(Color.accentColor)
+                }
+                .padding(.leading, 34)
             }
-            .padding(.leading, 34)
         case .footer(_, let t): TurnFooter(task: t, last: last).padding(.leading, 34)
         }
     }
@@ -72,7 +75,7 @@ private struct AssistantMessage: View {
                 .frame(width: 24, height: 24).background(Color.accentColor, in: Circle())
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
-                    Text("mob").font(.caption.weight(.semibold))
+                    Text("Mob").font(.caption.weight(.semibold))
                     Text(runnerLabels[runner ?? "codex"] ?? runner ?? "").font(.caption2).foregroundStyle(.secondary)
                     Spacer()
                     Button { UIPasteboard.general.string = message.content } label: {
