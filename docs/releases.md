@@ -4,9 +4,9 @@
 标注说明：
 
 - **【现有】**：仓库中已有并核对过的设置（`mob-ios.xcodeproj`、`Info.plist`）。
-- **【待建】**：尚未配置。仓库中**没有**发布工作流、Makefile、发布脚本、`DEVELOPMENT_TEAM`、
-  entitlements 文件或隐私清单（`PrivacyInfo.xcprivacy`）；也无法从仓库确认 App Store Connect
-  上是否已有应用记录。
+- **【待建】**：尚未配置。仓库有 `make archive`、`ExportOptions.plist` 和隐私清单
+  （`PrivacyInfo.xcprivacy`），但**没有**发布工作流、`DEVELOPMENT_TEAM` 或 entitlements 文件；
+  也无法从仓库确认 App Store Connect 上是否已有应用记录。
 
 当前可行的发布路径是手动：Xcode Archive → 上传 App Store Connect → TestFlight → App Store。
 CI 自动化见第六节（提议）。
@@ -112,7 +112,7 @@ Apple 的「收集」指开发者或第三方获取数据；数据只到用户�
 | --- | --- | --- |
 | `NSCameraUsageDescription` | Scan the pairing QR code shown by mobd link. | 【现有】 |
 | `NSLocalNetworkUsageDescription` | mob connects to mobd on your office Mac over your local network. | 【现有】 |
-| `NSMicrophoneUsageDescription` | — | 【待建】，按第一节 4.2 视上传结果决定 |
+| `NSMicrophoneUsageDescription` | mob does not record audio; the live desktop's WebRTC library declares microphone access. | 【现有】 |
 | 照片 | 无需；`PhotosPicker` 不要求权限 | — |
 
 说明文字目前只有英文；如果商店主要语言为中文，可增加 `InfoPlist.strings` 本地化（可选）。
