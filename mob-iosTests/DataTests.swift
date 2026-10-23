@@ -100,4 +100,10 @@ final class DataTests: XCTestCase {
         XCTAssertFalse(APIClient.shouldRetry(URLError(.cannotFindHost), method: "GET"))
         XCTAssertFalse(APIClient.shouldRetry(APIError(message: "x", status: 500), method: "GET"))
     }
+
+    func testGatewayErrorsFromTheProxyAreExplained() {
+        XCTAssertEqual(APIClient.proxyMessage(502), "The office Mac answered, but mobd is not running there. Start it with mobd start.")
+        XCTAssertEqual(APIClient.proxyMessage(504), "mobd did not answer in time")
+        XCTAssertNil(APIClient.proxyMessage(500))
+    }
 }

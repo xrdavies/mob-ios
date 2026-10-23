@@ -91,7 +91,8 @@ final class APIClient {
         guard let http = response as? HTTPURLResponse else { return }
         guard (200..<300).contains(http.statusCode) else {
             let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-            throw APIError(message: body?["error"] as? String ?? "HTTP \(http.statusCode)", status: http.statusCode, code: body?["code"] as? String)
+            let message = body?["error"] as? String ?? APIClient.proxyMessage(http.statusCode) ?? "HTTP \(http.statusCode)"
+            throw APIError(message: message, status: http.statusCode, code: body?["code"] as? String)
         }
     }
 
@@ -106,6 +107,16 @@ final class APIClient {
         catch where APIClient.shouldRetry(error, method: method) { (data, response) = try await session.data(for: req) }
         try check(data, response)
         return data
+    }
+
+    /// A gateway error without mobd's JSON body comes from the proxy in front of it (Tailscale
+    /// Serve or Funnel): the office Mac answered, mobd did not.
+    static func proxyMessage(_ status: Int) -> String? {
+        switch status {
+        case 502, 503: return "The office Mac answered, but mobd is not running there. Start it with mobd start."
+        case 504: return "mobd did not answer in time"
+        default: return nil
+        }
     }
 
     /// A slow or dropped connection gets one more try, for reads only: a repeated POST could
