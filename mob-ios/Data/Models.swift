@@ -14,6 +14,7 @@ private let checkLabels = [
     "actuation": "Desktop control",
     "codex": "Codex",
     "claude": "Claude Code",
+    "pi": "Pi",
 ]
 
 struct Health: Codable {

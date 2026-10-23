@@ -44,7 +44,6 @@ struct Composer: View {
         let uploading = attachments.contains { $0.uploadId == nil && $0.error == nil }
 
         VStack(alignment: .leading, spacing: 8) {
-            if let task, Status.busy(task.status) { status(task) }
             if !attachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) { ForEach(attachments) { chip($0) } }
@@ -192,27 +191,6 @@ struct Composer: View {
             Label(label, systemImage: icon).font(.caption).lineLimit(1)
                 .padding(.horizontal, 8).padding(.vertical, 5)
                 .background(Color(.secondarySystemBackground), in: Capsule())
-        }
-    }
-
-    private func status(_ task: AgentTask) -> some View {
-        TimelineView(.periodic(from: .now, by: 1)) { _ in
-            HStack(spacing: 6) {
-                if chat.cancelling {
-                    Circle().fill(.red).frame(width: 8, height: 8)
-                    Text("Stopping…").foregroundStyle(.red)
-                } else if task.status == Status.queued {
-                    Circle().fill(.secondary).frame(width: 8, height: 8)
-                    Text(queuedLabel(task)).foregroundStyle(.secondary)
-                } else if task.waiting == true || chat.detail?.questions.contains(where: \.isPending) == true {
-                    Circle().fill(Color.waiting).frame(width: 8, height: 8)
-                    Text("Waiting for your answer").foregroundStyle(Color.waiting)
-                } else {
-                    ProgressView().controlSize(.mini)
-                    Text("Working… \(duration(task.startedAt, nil))").foregroundStyle(Color.accentColor)
-                }
-            }
-            .font(.caption.weight(.medium))
         }
     }
 }

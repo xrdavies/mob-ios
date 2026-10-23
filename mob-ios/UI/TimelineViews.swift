@@ -1,6 +1,6 @@
 import SwiftUI
 
-private let runnerLabels = ["codex": "Codex", "claude": "Claude Code"]
+private let runnerLabels = ["codex": "Codex", "claude": "Claude Code", "pi": "Pi"]
 
 /// One timeline entry. `last` marks the newest turn footer (it offers Retry).
 struct TimelineRow: View {
@@ -19,18 +19,36 @@ struct TimelineRow: View {
         case .queued(_, let t):
             Label(queuedLabel(t), systemImage: "clock")
                 .font(.caption).foregroundStyle(.secondary).padding(.leading, 34)
-        case .working(_, _, let latest, let waiting):
-            // While a question waits, the composer's status line already says so.
-            if !waiting {
-                HStack(spacing: 8) {
+        case .working(_, let t, let latest, let waiting): WorkingRow(task: t, latest: latest, waiting: waiting).padding(.leading, 34)
+        case .footer(_, let t): TurnFooter(task: t, last: last).padding(.leading, 34)
+        }
+    }
+}
+
+/// The running turn's state and how long it has run; the only place the chat shows it.
+private struct WorkingRow: View {
+    @Environment(AppState.self) private var app
+    let task: AgentTask
+    let latest: Activity?
+    let waiting: Bool
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { _ in
+            let time = duration(task.startedAt, nil)
+            HStack(spacing: 8) {
+                if app.chat.cancelling {
+                    Circle().fill(.red).frame(width: 8, height: 8)
+                    Text("Stopping…").foregroundStyle(.red)
+                } else if waiting {
+                    Circle().fill(Color.waiting).frame(width: 8, height: 8)
+                    Text("Waiting for your answer").foregroundStyle(Color.waiting)
+                } else {
                     ProgressView().controlSize(.mini)
-                    Text(latest.map { "Working · \($0.title)" } ?? "Working…")
-                        .font(.caption).lineLimit(1)
+                    Text((["Working", time] + [latest?.title].compactMap { $0 }).filter { !$0.isEmpty }.joined(separator: " · "))
                         .foregroundStyle(Color.accentColor)
                 }
-                .padding(.leading, 34)
             }
-        case .footer(_, let t): TurnFooter(task: t, last: last).padding(.leading, 34)
+            .font(.caption).lineLimit(1)
         }
     }
 }
