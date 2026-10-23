@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		A100000000000000000000A2 /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = A100000000000000000000A1 /* WebRTC */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		A10000000000000000000020 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -38,10 +42,6 @@
 			target = A10000000000000000000010 /* mob-ios */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
-
-/* Begin PBXBuildFile section */
-		A100000000000000000000A2 /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = A100000000000000000000A1 /* WebRTC */; };
-/* End PBXBuildFile section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		A10000000000000000000030 /* mob-ios */ = {
@@ -337,8 +337,11 @@
 		A10000000000000000000017 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 69GK3C9666;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "mob-ios/Info.plist";
@@ -347,9 +350,9 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.xrdavies.mob-ios";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -359,8 +362,11 @@
 		A10000000000000000000018 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 69GK3C9666;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "mob-ios/Info.plist";
@@ -369,9 +375,9 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.xrdavies.mob-ios";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
