@@ -44,7 +44,8 @@ final class APIClient {
         self.baseURL = APIClient.normalize(baseURL)
         self.token = token
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 10
+        // Remote routes (Tailscale Funnel's relays) can take seconds per request.
+        config.timeoutIntervalForRequest = 20
         config.waitsForConnectivity = false
         // The token must not follow a redirect to another origin.
         session = URLSession(configuration: config, delegate: SameOriginRedirects(), delegateQueue: nil)
@@ -100,9 +101,18 @@ final class APIClient {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
-        let (data, response) = try await session.data(for: req)
+        let (data, response): (Data, URLResponse)
+        do { (data, response) = try await session.data(for: req) }
+        catch where APIClient.shouldRetry(error, method: method) { (data, response) = try await session.data(for: req) }
         try check(data, response)
         return data
+    }
+
+    /// A slow or dropped connection gets one more try, for reads only: a repeated POST could
+    /// send the same message or answer twice.
+    static func shouldRetry(_ error: Error, method: String) -> Bool {
+        guard method == "GET", let e = error as? URLError else { return false }
+        return e.code == .timedOut || e.code == .networkConnectionLost
     }
 
     private func get<T: Decodable>(_ path: String, query: [String: String] = [:]) async throws -> T {

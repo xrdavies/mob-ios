@@ -92,4 +92,12 @@ final class DataTests: XCTestCase {
         XCTAssertEqual(APIClient.normalize("192.168.1.5:8080").absoluteString, "http://192.168.1.5:8080/")
         XCTAssertEqual(APIClient.normalize("https://mac.local/ ").absoluteString, "https://mac.local/")
     }
+
+    func testOnlyReadsAreRetriedAfterATimeoutOrDroppedConnection() {
+        XCTAssertTrue(APIClient.shouldRetry(URLError(.timedOut), method: "GET"))
+        XCTAssertTrue(APIClient.shouldRetry(URLError(.networkConnectionLost), method: "GET"))
+        XCTAssertFalse(APIClient.shouldRetry(URLError(.timedOut), method: "POST"), "a task or answer must not be sent twice")
+        XCTAssertFalse(APIClient.shouldRetry(URLError(.cannotFindHost), method: "GET"))
+        XCTAssertFalse(APIClient.shouldRetry(APIError(message: "x", status: 500), method: "GET"))
+    }
 }
