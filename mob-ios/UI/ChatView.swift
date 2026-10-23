@@ -14,6 +14,12 @@ struct ChatView: View {
         return buildTimeline(tasks: d.tasks, messages: d.session.messages ?? [], activities: d.activities, questions: d.questions)
     }
 
+    /// The message being sent to the open chat (or to a new chat).
+    private var outgoing: Outgoing? {
+        guard let o = chat.outbox, o.sessionId == chat.currentId else { return nil }
+        return o
+    }
+
     var body: some View {
         // iPad: the chat list stays beside the chat instead of opening as a sheet.
         if sizeClass == .regular {
@@ -137,9 +143,9 @@ struct ChatView: View {
             empty("This device needs to be paired again", "mobd on \(m.name) does not accept this device. Run mobd link on the office Mac, then pair with the new link or QR code.") {
                 Button("Pair again") { pairing = PairRequest(machine: m) }.buttonStyle(.borderedProminent)
             }
-        } else if chat.currentId == nil {
+        } else if chat.currentId == nil && outgoing == nil {
             empty("New chat on \(app.activeMachine?.name ?? "")", "Ask the agent to do something on the office Mac")
-        } else if chat.detail == nil && chat.loading {
+        } else if chat.detail == nil && chat.loading && outgoing == nil {
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             timeline(items, lastFooter: lastFooter)
@@ -166,6 +172,7 @@ struct ChatView: View {
                     ForEach(items) { item in
                         TimelineRow(item: item, runner: chat.detail?.session.runner, last: item.id == lastFooter).id(item.id)
                     }
+                    if let o = outgoing { OutgoingMessage(text: o.text).id("outbox") }
                     Color.clear.frame(height: 1).id("bottom")
                 }
                 .padding(16)
@@ -174,6 +181,7 @@ struct ChatView: View {
             .scrollDismissesKeyboard(.interactively)
             // Follow new output; a new question always comes into view.
             .onChange(of: items.last?.id) { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
+            .onChange(of: outgoing) { if outgoing != nil { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } } }
             .onChange(of: pendingQuestion) { if pendingQuestion != nil { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } } }
             .onChange(of: chat.currentId) { proxy.scrollTo("bottom", anchor: .bottom) }
         }

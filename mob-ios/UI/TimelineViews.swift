@@ -380,3 +380,21 @@ private struct FlowButtons: View {
         ForEach(options, id: \.self) { o in Button(o) { action(o) }.buttonStyle(.bordered) }
     }
 }
+
+/// A message on its way to mobd: shown at once, dimmed, until mobd's copy replaces it.
+struct OutgoingMessage: View {
+    let text: String
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 4) {
+            Text(text)
+                .padding(.horizontal, 14).padding(.vertical, 10)
+                .foregroundStyle(.white)
+                .background(Color.accentColor.opacity(0.6), in: UnevenRoundedRectangle(topLeadingRadius: 18, bottomLeadingRadius: 18, bottomTrailingRadius: 4, topTrailingRadius: 18))
+            Label("Sending…", systemImage: "arrow.up.circle").font(.caption2).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .padding(.leading, 48)
+        .accessibilityLabel("Sending: \(text)")
+    }
+}

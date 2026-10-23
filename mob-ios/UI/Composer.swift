@@ -122,10 +122,15 @@ struct Composer: View {
             return
         }
         guard !busy, !uploading, !chat.sending else { return }
-        chat.send(prompt, runner: runner, model: model, effort: effort, attachments: attachments.compactMap(\.uploadId)) { ok in
-            guard ok else { return }
-            if text.trimmingCharacters(in: .whitespacesAndNewlines) == prompt { text = "" }
-            attachments = []
+        // Clear at once: the message shows in the chat while it is sent.
+        let sent = attachments
+        text = ""
+        attachments = []
+        chat.send(prompt, runner: runner, model: model, effort: effort, attachments: sent.compactMap(\.uploadId)) { ok in
+            // Not sent: give the text back, unless something new was typed meanwhile.
+            guard !ok, text.isEmpty else { return }
+            text = prompt
+            attachments = sent
         }
     }
 

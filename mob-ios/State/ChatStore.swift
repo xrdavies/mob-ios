@@ -20,7 +20,9 @@ final class ChatStore {
     /// Archived chats; nil until the archive is opened.
     private(set) var archived: [Session]?
     private(set) var currentId: String?
-    private(set) var detail: ChatDetail?
+    private(set) var detail: ChatDetail? { didSet { settleOutbox() } }
+    /// The message being sent: shown in the chat at once, until mobd's copy arrives.
+    private(set) var outbox: Outgoing?
     private(set) var loading = false
     private(set) var sending = false
     /// A stop was requested and the turn has not ended yet.
@@ -289,24 +291,36 @@ final class ChatStore {
 
     // MARK: - Actions
 
-    /// Starts a turn; `done` gets true once mobd accepted it (the composer then clears).
+    /// Starts a turn. The message shows in the chat right away (see `outbox`); `done` gets false
+    /// if mobd did not accept it, so the composer can give the text back.
     func send(_ prompt: String, runner: String? = nil, model: String? = nil, effort: String? = nil,
               attachments: [String] = [], done: @escaping (Bool) -> Void = { _ in }) {
+        guard api != nil else { return done(false) }
         sending = true
         let sessionId = currentId
         let gen = generation
+        outbox = Outgoing(text: prompt, sessionId: sessionId)
         run { client in
             var ok = false
             defer {
                 self.sending = false
+                if !ok { self.outbox = nil }
                 done(ok)
             }
             let task = try await client.createTask(prompt: prompt, sessionId: sessionId, runner: runner, model: model, effort: effort, attachments: attachments)
             ok = true
+            self.outbox?.taskId = task.id
+            self.outbox?.sessionId = task.sessionId
             guard gen == self.generation else { return }
             if task.sessionId == self.currentId { self.reload() } else { self.open(task.sessionId) }
             await self.loadSessions()
         }
+    }
+
+    /// The sent message is in the conversation now: drop the local copy.
+    private func settleOutbox() {
+        guard let t = outbox?.taskId, detail?.session.messages?.contains(where: { $0.taskId == t }) == true else { return }
+        outbox = nil
     }
 
     func cancel() {
@@ -373,4 +387,12 @@ extension Array where Element: Identifiable {
     mutating func upsert(_ item: Element) {
         if let i = firstIndex(where: { $0.id == item.id }) { self[i] = item } else { append(item) }
     }
+}
+
+/// A message on its way to mobd: its conversation (nil for a new chat until mobd names it) and,
+/// once accepted, its turn.
+struct Outgoing: Equatable {
+    let text: String
+    var sessionId: String?
+    var taskId: String?
 }
