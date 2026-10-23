@@ -106,4 +106,41 @@ final class DataTests: XCTestCase {
         XCTAssertEqual(APIClient.proxyMessage(504), "mobd did not answer in time")
         XCTAssertNil(APIClient.proxyMessage(500))
     }
+
+    /// GET /sessions/{id} as mobd answers it: one message and one step per turn.
+    private func detail(_ turns: [(id: String, status: String, text: String)], rev: Int64?, full: Bool?) throws -> SessionDetail {
+        let tasks = turns.map { #"{"id":"\#($0.id)","sessionId":"s","status":"\#($0.status)"}"# }
+        let messages = turns.map { #"{"id":"\#($0.id):a","taskId":"\#($0.id)","role":"assistant","content":"\#($0.text)"}"# }
+        let steps = turns.map { #"{"id":"\#($0.id):1","taskId":"\#($0.id)","kind":"tool","status":"completed","title":"\#($0.text)"}"# }
+        var json = #"{"session":{"id":"s","messages":[\#(messages.joined(separator: ","))]},"tasks":[\#(tasks.joined(separator: ","))],"#
+            + #""activities":[\#(steps.joined(separator: ","))],"questions":[]"#
+        if let rev { json += #","rev":\#(rev)"# }
+        if let full { json += #","full":\#(full)"# }
+        return try APIClient.decoder.decode(SessionDetail.self, from: Data((json + "}").utf8))
+    }
+
+    func testAPartialAnswerReplacesOnlyTheTurnsItCarries() throws {
+        let base = ChatDetail.merged(try detail([("t1", "succeeded", "one"), ("t2", "running", "two…")], rev: 5, full: true), onto: nil)
+        XCTAssertEqual(base.rev, 5)
+        let delta = try detail([("t2", "succeeded", "two"), ("t3", "running", "three")], rev: 9, full: false)
+        let d = ChatDetail.merged(delta, onto: base)
+        XCTAssertEqual(d.rev, 9)
+        XCTAssertEqual(d.tasks.map(\.id), ["t1", "t2", "t3"])
+        XCTAssertEqual(d.tasks.map(\.status), ["succeeded", "succeeded", "running"])
+        XCTAssertEqual(d.session.messages?.map(\.content), ["one", "two", "three"])
+        XCTAssertEqual(d.activities.map(\.title), ["one", "two", "three"])
+
+        // An older turn that changed keeps its place.
+        let old = ChatDetail.merged(try detail([("t1", "succeeded", "one, edited")], rev: 10, full: false), onto: d)
+        XCTAssertEqual(old.session.messages?.map(\.content), ["one, edited", "two", "three"])
+    }
+
+    func testAFullAnswerOrAnOlderMobdReplacesEverything() throws {
+        let base = ChatDetail.merged(try detail([("t1", "succeeded", "one"), ("t2", "succeeded", "two")], rev: 5, full: true), onto: nil)
+        let full = ChatDetail.merged(try detail([("t2", "succeeded", "two")], rev: 3, full: true), onto: base)
+        XCTAssertEqual(full.tasks.map(\.id), ["t2"])
+        let legacy = ChatDetail.merged(try detail([("t1", "succeeded", "one")], rev: nil, full: nil), onto: base)
+        XCTAssertEqual(legacy.tasks.map(\.id), ["t1"])
+        XCTAssertNil(legacy.rev)
+    }
 }

@@ -7,9 +7,33 @@ struct ChatDetail: Equatable {
     var tasks: [AgentTask]
     var activities: [Activity]
     var questions: [Question]
+    /// mobd's revision this state was fetched at; nil from mobd versions without it.
+    var rev: Int64? = nil
 
     var current: AgentTask? { tasks.last }
     var busy: Bool { Status.busy(current?.status) }
+
+    /// `d` applied to `base`: a full answer replaces it; a partial one (`full: false`) replaces only
+    /// the turns it carries, with their messages, steps and questions, and keeps the rest.
+    static func merged(_ d: SessionDetail, onto base: ChatDetail?) -> ChatDetail {
+        let tasks = d.tasks ?? [], activities = d.activities ?? [], questions = d.questions ?? []
+        guard d.full == false, let base, base.session.id == d.session.id else {
+            return ChatDetail(session: d.session, tasks: tasks, activities: activities, questions: questions, rev: d.rev)
+        }
+        var all = base.tasks
+        for t in tasks { all.upsert(t) }
+        let changed = Set(tasks.map(\.id))
+        // Kept in turn order, so a changed older turn stays in its place.
+        func pick<T>(_ old: [T], _ new: [T], _ turn: (T) -> String) -> [T] {
+            let known = Set(all.map(\.id))
+            let byTurn = Dictionary(grouping: old.filter { !changed.contains(turn($0)) } + new, by: turn)
+            return all.flatMap { byTurn[$0.id] ?? [] } + old.filter { !known.contains(turn($0)) }
+        }
+        var session = d.session
+        session.messages = pick(base.session.messages ?? [], d.session.messages ?? [], \.taskId)
+        return ChatDetail(session: session, tasks: all, activities: pick(base.activities, activities, \.taskId),
+                          questions: pick(base.questions, questions, \.taskId), rev: d.rev ?? base.rev)
+    }
 }
 
 /// Chats on the active machine: the list, the open conversation, and every action on them.
@@ -20,7 +44,12 @@ final class ChatStore {
     /// Archived chats; nil until the archive is opened.
     private(set) var archived: [Session]?
     private(set) var currentId: String?
-    private(set) var detail: ChatDetail? { didSet { settleOutbox() } }
+    private(set) var detail: ChatDetail? {
+        didSet {
+            settleOutbox()
+            if let detail { remember(detail) }
+        }
+    }
     /// The message being sent: shown in the chat at once, until mobd's copy arrives.
     private(set) var outbox: Outgoing?
     private(set) var loading = false
@@ -43,6 +72,9 @@ final class ChatStore {
     @ObservationIgnored private var listPoll: Task<Void, Never>?
     @ObservationIgnored private var stream: Task<Void, Never>?
     @ObservationIgnored private var streamTask: String?
+    /// Recently opened conversations on this machine, most recent last: reopening one shows it
+    /// at once and fetches only what changed.
+    @ObservationIgnored private var cache: [ChatDetail] = []
 
     private var key: String { "session.\(machineId)" }
 
@@ -58,6 +90,7 @@ final class ChatStore {
         archived = nil
         detail = nil
         currentId = nil
+        cache = []
         guard client != nil else { return }
         let gen = generation
         listPoll = Task { [weak self] in
@@ -119,13 +152,13 @@ final class ChatStore {
         let changed = id != currentId
         currentId = id
         defer { if changed { onOpen?() } }
-        detail = nil
+        detail = cache.last { $0.session.id == id }
         cancelling = false
         UserDefaults.standard.set(id, forKey: key)
         poll?.cancel()
         stopStream()
         guard let id else { return }
-        loading = true
+        loading = detail == nil
         follow(id)
     }
 
@@ -138,9 +171,9 @@ final class ChatStore {
             var first = true
             while let self, !Task.isCancelled, gen == self.generation, self.currentId == id {
                 do {
-                    let d = try await client.session(id)
-                    guard gen == self.generation, self.currentId == id else { break }
-                    let fresh = ChatDetail(session: d.session, tasks: d.tasks ?? [], activities: d.activities ?? [], questions: d.questions ?? [])
+                    let d = try await client.session(id, since: self.detail?.rev)
+                    guard !Task.isCancelled, gen == self.generation, self.currentId == id else { break }
+                    let fresh = ChatDetail.merged(d, onto: self.detail)
                     // A snapshot fetched before newer stream events must not replace them.
                     let shown = self.detail
                     let stale = shown != nil && shown?.current?.id == fresh.current?.id && fresh.busy &&
@@ -152,7 +185,7 @@ final class ChatStore {
                     if Task.isCancelled || self.unauthorized(error, gen) { break }
                     if first, (error as? APIError)?.status == 404 {
                         // The saved chat was deleted elsewhere.
-                        if gen == self.generation { self.open(nil) }
+                        if gen == self.generation { self.remove(id) }
                         break
                     }
                     if first, gen == self.generation { self.error = readable(error) }
@@ -163,6 +196,12 @@ final class ChatStore {
                 try? await Task.sleep(for: .seconds(wait))
             }
         }
+    }
+
+    private func remember(_ d: ChatDetail) {
+        cache.removeAll { $0.session.id == d.session.id }
+        cache.append(d)
+        if cache.count > 8 { cache.removeFirst() }
     }
 
     /// Re-reads the open conversation now (after an action) without clearing it.
@@ -278,6 +317,7 @@ final class ChatStore {
     }
 
     func remove(_ id: String) {
+        cache.removeAll { $0.session.id == id }
         sessions.removeAll { $0.id == id }
         archived?.removeAll { $0.id == id }
         if id == currentId { open(nil) }
@@ -377,7 +417,7 @@ final class ChatStore {
     func delete(_ s: Session) {
         run { client in
             try await client.deleteSession(s.id)
-            if s.id == self.currentId { self.open(nil) }
+            self.remove(s.id)
             await self.loadSessions()
         }
     }

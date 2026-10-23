@@ -176,7 +176,10 @@ final class APIClient {
         (try await get("sessions", query: ["archived": archived]) as SessionsResponse).sessions ?? []
     }
 
-    func session(_ id: String) async throws -> SessionDetail { try await get("sessions/\(id)") }
+    /// With `since`, mobd may answer only the turns changed after that revision (see ChatDetail.merged).
+    func session(_ id: String, since: Int64? = nil) async throws -> SessionDetail {
+        try await get("sessions/\(id)", query: since.map { ["since": String($0)] } ?? [:])
+    }
 
     func patchSession(_ id: String, title: String? = nil, pinned: Bool? = nil, archived: Bool? = nil) async throws {
         var body: [String: Any] = [:]

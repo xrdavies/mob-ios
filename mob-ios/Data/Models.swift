@@ -283,6 +283,10 @@ struct SessionDetail: Codable {
     let tasks: [AgentTask]?
     let activities: [Activity]?
     let questions: [Question]?
+    /// The conversation's revision; nil from mobd versions without incremental fetch.
+    var rev: Int64? = nil
+    /// False when this answers `since` with only the turns changed after it.
+    var full: Bool? = nil
 }
 
 struct Upload: Codable {
