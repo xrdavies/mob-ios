@@ -293,7 +293,8 @@ private struct TurnFooter: View {
                     Spacer()
                     if last {
                         Button {
-                            app.chat.send(task.prompt ?? "", model: task.model, effort: task.effort, attachments: task.attachments ?? [])
+                            // A follow-up turn uses the conversation's model and effort; mobd refuses them on POST /tasks.
+                            app.chat.send(task.prompt ?? "", attachments: task.attachments ?? [])
                         } label: { Label("Retry", systemImage: "arrow.clockwise") }
                         .buttonStyle(.bordered).controlSize(.small)
                         .disabled(app.chat.sending || app.chat.detail?.busy == true || !app.isConnected)
