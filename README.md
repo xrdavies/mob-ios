@@ -35,6 +35,8 @@ A thumbnail under the title (hidden by default, toggled from the top bar; view-o
 
 Not yet checked: a real phone by hand (clicks, typing, gestures), a throttled link, the real Funnel path and a phone off Wi-Fi, and the TestFlight check for camera/microphone purpose-string warnings from the WebRTC binary.
 
+iPhone Duo support is not yet verified; see the [adaptation tasks](docs/iphone-duo.md).
+
 ## Setup
 
 1. Clone: `git clone git@github.com:xrdavies/mob-ios.git`
