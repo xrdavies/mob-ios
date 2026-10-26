@@ -114,9 +114,71 @@ final class PairingTests: XCTestCase {
     func testPairedMachineRoundTrip() throws {
         var m = Machine(id: "m", name: "Office", mobdUrl: "https://o.example")
         m.serverId = "S"
-        m.clientId = "C"
+        m.addresses[0].clientId = "C"
         let back = try JSONDecoder().decode(Machine.self, from: JSONEncoder().encode(m))
         XCTAssertEqual(back, m)
         XCTAssertFalse(back.needsPairing)
+    }
+
+    func testMachineSavedBeforeAddressesKeepsItsTokenAccount() throws {
+        let old = #"[{"id":"m1","name":"Office","mobdUrl":"http://office.local:8080","serverId":"S","clientId":"C","needsPairing":false}]"#
+        let m = try XCTUnwrap(JSONDecoder().decode([Machine].self, from: Data(old.utf8)).first)
+        XCTAssertEqual(m.addresses.map(\.id), ["m1"])
+        XCTAssertEqual(m.tokenAccount, "m1.token")
+        XCTAssertEqual(m.mobdUrl, "http://office.local:8080")
+        XCTAssertEqual(m.clientId, "C")
+        XCTAssertFalse(m.needsPairing)
+        let back = try JSONDecoder().decode(Machine.self, from: JSONEncoder().encode(m))
+        XCTAssertEqual(back, m)
+    }
+
+    func testAddressKinds() {
+        for lan in ["http://office-mac.local:8080", "http://192.168.1.20:8080", "http://10.0.0.2", "http://172.20.1.1", "http://[fd00::1]:8080"] {
+            XCTAssertEqual(AddressKind.of(lan), .lan, lan)
+        }
+        for remote in ["https://office.tail49e461.ts.net", "https://mob.example.com", "http://100.101.1.2:8080", "http://172.32.0.1"] {
+            XCTAssertEqual(AddressKind.of(remote), .remote, remote)
+        }
+    }
+
+    func testPairingAddsASecondAddressToTheSameOffice() {
+        var m = Machine(id: "m", name: "Office", mobdUrl: "http://office.local:8080")
+        m.serverId = "S"
+        let (two, n, dropped) = m.pairing(origin: "https://office.tail.ts.net", serverId: "S", clientId: "C2")
+        XCTAssertEqual(n, 1)
+        XCTAssertTrue(dropped.isEmpty)
+        XCTAssertEqual(two.addresses.map(\.url), ["http://office.local:8080", "https://office.tail.ts.net"])
+        XCTAssertEqual(two.addresses[0].tokenAccount, "m.token", "the first address keeps its token")
+        XCTAssertNotEqual(two.addresses[1].tokenAccount, "m.token", "each address has its own token")
+        XCTAssertEqual(two.mobdUrl, "https://office.tail.ts.net", "the new address is used")
+        XCTAssertEqual(two.addresses.map { two.label($0) }, ["LAN", "Remote"])
+
+        // The same address again is paired again, not added.
+        let (again, i, _) = two.pairing(origin: "https://office.tail.ts.net", serverId: "S", clientId: "C3")
+        XCTAssertEqual(i, 1)
+        XCTAssertEqual(again.addresses.count, 2)
+        XCTAssertEqual(again.clientId, "C3")
+
+        // Another office replaces the addresses (the user confirmed it) and drops their tokens.
+        let (other, _, gone) = two.pairing(origin: "http://10.0.0.9:8080", serverId: "T", clientId: "D")
+        XCTAssertEqual(other.addresses.map(\.url), ["http://10.0.0.9:8080"])
+        XCTAssertEqual(other.addresses[0].id, "m")
+        XCTAssertEqual(Set(gone), Set(two.addresses.map(\.tokenAccount)))
+    }
+
+    func testRouteLabelsAndChoice() {
+        var m = Machine(id: "m", name: "Office", mobdUrl: "https://a.ts.net")
+        m.addresses.append(MachineAddress(id: "b", url: "https://b.example.com"))
+        XCTAssertEqual(m.addresses.map { m.label($0) }, ["Remote", "Remote 2"])
+        m.addresses[1].label = "Cloudflare"
+        XCTAssertEqual(m.label(m.addresses[1]), "Cloudflare")
+        XCTAssertEqual(m.mobdUrl, "https://a.ts.net", "the first address without a choice")
+        m.route = "b"
+        XCTAssertEqual(m.mobdUrl, "https://b.example.com")
+        m.needsPairing = true
+        XCTAssertTrue(m.addresses[1].needsPairing)
+        XCTAssertFalse(m.addresses[0].needsPairing, "only the refused address needs pairing")
+        m.route = "gone"
+        XCTAssertEqual(m.mobdUrl, "https://a.ts.net")
     }
 }

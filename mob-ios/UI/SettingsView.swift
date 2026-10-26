@@ -20,29 +20,34 @@ struct SettingsView: View {
                         Text("No office Mac yet. Run mobd link on the Mac that runs the agent, then add it with the link or QR code.").foregroundStyle(.secondary)
                     }
                     ForEach(app.machines) { m in
-                        HStack {
-                            Button { app.selectMachine(m.id) } label: {
-                                HStack(spacing: 12) {
-                                    Image(systemName: m.id == app.activeMachineId ? "largecircle.fill.circle" : "circle")
-                                        .foregroundStyle(m.id == app.activeMachineId ? Color.accentColor : .secondary)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(m.name).foregroundStyle(.primary)
-                                        Text(m.mobdUrl)
-                                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                                        if m.needsPairing {
-                                            Label("Needs pairing", systemImage: "exclamationmark.triangle.fill")
-                                                .font(.caption).foregroundStyle(Color.waiting)
-                                        }
-                                    }
+                        // The row selects the machine; the route line has its own "Use …" button.
+                        HStack(spacing: 12) {
+                            Image(systemName: m.id == app.activeMachineId ? "largecircle.fill.circle" : "circle")
+                                .foregroundStyle(m.id == app.activeMachineId ? Color.accentColor : .secondary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(m.name).foregroundStyle(.primary)
+                                RouteLine(machine: m)
+                                if m.needsPairing && m.addresses.count == 1 {
+                                    Label("Needs pairing", systemImage: "exclamationmark.triangle.fill")
+                                        .font(.caption).foregroundStyle(Color.waiting)
                                 }
                             }
-                            .buttonStyle(.plain)
                             Spacer()
                             if m.needsPairing {
                                 Button("Pair again") { pairing = PairRequest(machine: m) }.buttonStyle(.borderless)
                             }
                             Button { editing = m } label: { Image(systemName: "pencil") }
                                 .buttonStyle(.borderless).accessibilityLabel("Edit \(m.name)")
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture { app.selectMachine(m.id) }
+                        .accessibilityAddTraits(.isButton)
+                        .contextMenu {
+                            RouteMenuItems(machine: m)
+                            if m.addresses.count > 1 { Divider() }
+                            Button { editing = m } label: { Label("Edit", systemImage: "pencil") }
+                            Button { pairing = PairRequest(machine: m) } label: { Label("Pair again or add address", systemImage: "qrcode.viewfinder") }
+                            Button(role: .destructive) { deleting = m } label: { Label("Remove", systemImage: "trash") }
                         }
                         .swipeActions {
                             Button("Remove", role: .destructive) { deleting = m }
@@ -161,15 +166,36 @@ private struct MachineEditor: View {
             Form {
                 Section {
                     TextField("Name (Office Mac)", text: $machine.name)
-                    LabeledContent("Address", value: machine.mobdUrl)
-                    Button("Change address…") {
+                }
+                Section {
+                    ForEach($machine.addresses) { $a in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                TextField(a.kind.rawValue, text: Binding(get: { a.label ?? "" }, set: { a.label = $0 }))
+                                if a.id == machine.address?.id { Text("In use").font(.caption).foregroundStyle(.secondary) }
+                            }
+                            Text(a.url).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            if a.needsPairing {
+                                Label("Needs pairing", systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(Color.waiting)
+                            }
+                        }
+                        .deleteDisabled(machine.addresses.count < 2)
+                    }
+                    .onDelete { rows in
+                        for i in rows {
+                            app.removeAddress(machine.id, machine.addresses[i].id)
+                        }
+                        machine.addresses.remove(atOffsets: rows)
+                        if !machine.addresses.contains(where: { $0.id == machine.route }) { machine.route = nil }
+                    }
+                    Button("Add address…") {
                         onPairAgain()
                         dismiss()
                     }
                 } header: {
-                    Text("Connection")
+                    Text("Addresses")
                 } footer: {
-                    Text("The address comes from the pairing link. To change it, run mobd link --url <new address> on the office Mac and pair again; the device credential is never sent to an unverified address.")
+                    Text("Each address is paired on its own, so the device credential never goes to an address it was not paired on. To add one, run mobd link (or mobd link --lan) on the office Mac and scan its code. Choose which address Mob uses by long-pressing the machine in the list.")
                 }
                 Section {
                     NavigationLink { AgentSettingsScreen(machine: machine) } label: { Label("Agents", systemImage: "cpu") }
@@ -239,10 +265,10 @@ struct PairingSheet: View {
         existing ?? link.flatMap { l in app.machines.first { $0.serverId == l.serverId } }
     }
 
-    /// The link points somewhere other than the saved address.
-    private var moved: Bool {
-        guard let t = target, let link, !t.mobdUrl.isEmpty, let url = URL(string: link.origin) else { return false }
-        return !sameOrigin(APIClient.normalize(t.mobdUrl), url)
+    /// The link is another address of the saved office: pairing adds it to the same row.
+    private var newAddress: Bool {
+        guard let t = target, !otherOffice, t.serverId != nil, let link, let url = URL(string: link.origin) else { return false }
+        return !t.addresses.contains { sameOrigin(APIClient.normalize($0.url), url) }
     }
 
     /// The link belongs to another office than the one saved.
@@ -284,11 +310,11 @@ struct PairingSheet: View {
                         start()
                     } label: {
                         HStack {
-                            Text(target == nil ? "Pair" : "Pair again")
+                            Text(target == nil ? "Pair" : newAddress ? "Add address" : "Pair again")
                             if busy { Spacer(); ProgressView() }
                         }
                     }
-                    .disabled(link == nil || busy || ((moved || otherOffice) && !confirmed) || PairLink.validName(deviceName) == nil)
+                    .disabled(link == nil || busy || (otherOffice && !confirmed) || PairLink.validName(deviceName) == nil)
                     if let error { Text(error).font(.caption).foregroundStyle(.red) }
                 } footer: {
                     Text("mobd link prints the same kind of link for every way of reaching the office Mac: its LAN, VPN or Tailscale address, or a self-hosted Tailscale Funnel HTTPS address. MOB relay — coming soon.")
@@ -315,13 +341,14 @@ struct PairingSheet: View {
             if link.isInsecure {
                 warning("Not encrypted: use only on a trusted network or a Tailscale/VPN address.")
             }
-            if let t = target, moved {
-                warning("This address differs from the one saved for \(t.name) (\(t.mobdUrl)). Pair only if the office Mac moved.")
+            if let t = target, newAddress {
+                Text("Adds this address to \(t.name) as \(AddressKind.of(link.origin).rawValue), next to \(t.addresses.map { t.label($0) }.joined(separator: ", ")). Mob uses it from now on; long-press \(t.name) in the machine list to switch.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             if let t = target, otherOffice {
-                warning("This link is for a different office than the one saved as \(t.name).")
+                warning("This link is for a different office than the one saved as \(t.name). Pairing replaces its addresses.")
             }
-            if moved || otherOffice {
+            if otherOffice {
                 Toggle("Use this address", isOn: $confirmed)
             }
             if target == nil {

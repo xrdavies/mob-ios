@@ -100,6 +100,7 @@ struct ChatView: View {
     /// Timeline and composer, kept to a readable width on wide screens.
     private func chatColumn(_ items: [TimelineItem], lastFooter: String?, thumbnailOnTop: Bool, width: CGFloat) -> some View {
         VStack(spacing: 0) {
+            RouteBanner()
             if let banner = app.desktops.visibleBanner { ResourceBannerView(banner: banner) }
             if thumbnailOnTop, app.showDesktopDrawer, app.activeMachine != nil {
                 DesktopThumbnail(width: width)
@@ -124,7 +125,16 @@ struct ChatView: View {
                 .font(.headline).lineLimit(1)
             HStack(spacing: 5) {
                 Circle().fill(app.isConnected ? Color.success : .red).frame(width: 7, height: 7)
-                Text(app.activeMachine?.name ?? "No office Mac").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                if let m = app.activeMachine, m.addresses.count > 1, let a = m.address {
+                    // Two ways to reach the Mac: show which one, and let the user switch here.
+                    Menu {
+                        RouteMenuItems(machine: m)
+                    } label: {
+                        Text("\(m.name) · via \(m.label(a))").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                } else {
+                    Text(app.activeMachine?.name ?? "No office Mac").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
                 if let waiting = app.queued[app.activeMachineId ?? ""], waiting > 0 {
                     Text("· queue \(waiting)").font(.caption).foregroundStyle(.secondary)
                 }
@@ -354,6 +364,9 @@ struct SessionList: View {
                     let title = m.name + ((app.queued[m.id] ?? 0) > 0 ? " · queue \(app.queued[m.id]!)" : "")
                     if m.id == app.activeMachineId { Label(title, systemImage: "checkmark") } else { Text(title) }
                 }
+            }
+            if let m = app.activeMachine, m.addresses.count > 1 {
+                Section("\(m.name) route") { RouteMenuItems(machine: m) }
             }
             Divider()
             Button {

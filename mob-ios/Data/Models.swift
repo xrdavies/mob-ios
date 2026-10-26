@@ -329,50 +329,152 @@ struct TaskEvent: Codable {
     let timestamp: String?
 }
 
-/// An office Mac running mobd. Stored on the phone only; the device token and desktop password
-/// live in the Keychain, not in this JSON.
+/// One way to reach a machine's mobd (its LAN name, a Tailscale or Cloudflare address), paired on
+/// its own: each address has its own device token, so a token never goes to an address it was
+/// not paired on.
+struct MachineAddress: Codable, Identifiable, Hashable {
+    var id: String
+    var url: String
+    var clientId: String?
+    /// mobd refused this address's token (or there is none): pair this address again.
+    var needsPairing = false
+    /// A name the user gave it; nil shows the kind ("LAN" or "Remote").
+    var label: String?
+
+    var tokenAccount: String { "\(id).token" }
+    var token: String? { Keychain.get(tokenAccount) }
+    var kind: AddressKind { AddressKind.of(url) }
+}
+
+/// LAN for .local names and private or link-local addresses; Remote for anything else
+/// (Tailscale, Cloudflare, a VPN or public name).
+enum AddressKind: String {
+    case lan = "LAN", remote = "Remote"
+
+    static func of(_ url: String) -> AddressKind {
+        guard var host = URL(string: url)?.host?.lowercased() else { return .remote }
+        host = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        if host.hasSuffix(".local") { return .lan }
+        let parts = host.split(separator: ".").compactMap { Int($0) }
+        if parts.count == 4 {
+            let (a, b) = (parts[0], parts[1])
+            if a == 10 || (a == 172 && (16...31).contains(b)) || (a == 192 && b == 168) || (a == 169 && b == 254) { return .lan }
+            return .remote
+        }
+        if host.contains(":") && (host.hasPrefix("fe80") || host.hasPrefix("fc") || host.hasPrefix("fd")) { return .lan }
+        return .remote
+    }
+}
+
+/// An office Mac running mobd: one row, reached over one or more addresses. Stored on the phone
+/// only; the device tokens live in the Keychain, not in this JSON.
 struct Machine: Codable, Identifiable, Hashable {
     var id: String
     var name: String
-    var mobdUrl: String
+    var addresses: [MachineAddress]
+    /// The address in use, chosen by the user; the first when unset or gone.
+    var route: String?
     var liveQuality: String?
     /// The live view last needed mobd's WebSocket here (no UDP path): try it sooner next time.
     var liveWebSocket: Bool?
     /// The office's ID from pairing; nil for machines added before pairing existed.
     var serverId: String?
-    var clientId: String?
-    /// mobd refused the token (or there is none): run mobd link and pair again.
-    var needsPairing = false
 
-    var tokenAccount: String { "\(id).token" }
-    var token: String? { Keychain.get(tokenAccount) }
+    /// The first address keeps the machine's ID, so its token account ("<machine>.token") is the
+    /// one from before machines had several addresses.
+    init(id: String, name: String, mobdUrl: String) {
+        self.id = id
+        self.name = name
+        addresses = [MachineAddress(id: id, url: mobdUrl)]
+    }
+
+    private var current: Int? {
+        addresses.firstIndex { $0.id == route } ?? (addresses.isEmpty ? nil : 0)
+    }
+
+    /// The address in use.
+    var address: MachineAddress? { current.map { addresses[$0] } }
+
+    var mobdUrl: String { address?.url ?? "" }
+    var clientId: String? { address?.clientId }
+    /// The address in use needs pairing (the others may still work).
+    var needsPairing: Bool {
+        get { address?.needsPairing ?? true }
+        set { if let i = current { addresses[i].needsPairing = newValue } }
+    }
+    var tokenAccount: String { address?.tokenAccount ?? "\(id).token" }
+    var token: String? { address?.token }
+
+    /// "LAN", "Remote", or the user's label; a second address of the same kind is numbered.
+    func label(_ a: MachineAddress) -> String {
+        if let l = a.label?.trimmingCharacters(in: .whitespaces), !l.isEmpty { return l }
+        let same = addresses.filter { $0.kind == a.kind && ($0.label ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
+        guard same.count > 1, let n = same.firstIndex(where: { $0.id == a.id }), n > 0 else { return a.kind.rawValue }
+        return "\(a.kind.rawValue) \(n + 1)"
+    }
+
+    /// The machine after pairing `origin`: that address paired again when it is saved, else added
+    /// next to the others; a machine from before pairing, or of another office, keeps only the new
+    /// one. The paired address is the one in use. Returns its index and the token accounts of the
+    /// addresses that went.
+    func pairing(origin: String, serverId: String, clientId: String) -> (Machine, Int, dropped: [String]) {
+        var m = self
+        var dropped: [String] = []
+        if m.serverId != serverId {
+            dropped = m.addresses.map(\.tokenAccount)
+            m.addresses = []
+        }
+        let url = URL(string: origin)
+        let n: Int
+        if let i = m.addresses.firstIndex(where: { a in url.map { sameOrigin(APIClient.normalize(a.url), $0) } ?? false }) {
+            n = i
+        } else {
+            m.addresses.append(MachineAddress(id: m.addresses.isEmpty ? m.id : UUID().uuidString, url: origin))
+            n = m.addresses.count - 1
+        }
+        m.addresses[n].url = origin
+        m.addresses[n].clientId = clientId
+        m.addresses[n].needsPairing = false
+        m.route = m.addresses[n].id
+        m.serverId = serverId
+        return (m, n, dropped)
+    }
+
+    /// The address's host, for subtitles.
+    static func host(_ url: String) -> String { URL(string: url)?.host ?? url }
 }
 
 extension Machine {
-    private enum Keys: String, CodingKey { case id, name, mobdUrl, liveQuality, liveWebSocket, serverId, clientId, needsPairing }
+    private enum Keys: String, CodingKey { case id, name, addresses, route, mobdUrl, liveQuality, liveWebSocket, serverId, clientId, needsPairing }
 
-    /// Older saves have no pairing fields: such machines need pairing.
+    /// Saves from before addresses have one address from mobdUrl, clientId and needsPairing;
+    /// older ones have no pairing fields: such machines need pairing.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
         id = try c.decode(String.self, forKey: .id)
         name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
-        mobdUrl = try c.decodeIfPresent(String.self, forKey: .mobdUrl) ?? ""
         liveQuality = try c.decodeIfPresent(String.self, forKey: .liveQuality)
         liveWebSocket = try c.decodeIfPresent(Bool.self, forKey: .liveWebSocket)
         serverId = try c.decodeIfPresent(String.self, forKey: .serverId)
-        clientId = try c.decodeIfPresent(String.self, forKey: .clientId)
-        needsPairing = try c.decodeIfPresent(Bool.self, forKey: .needsPairing) ?? (serverId == nil)
+        route = try c.decodeIfPresent(String.self, forKey: .route)
+        if let list = try c.decodeIfPresent([MachineAddress].self, forKey: .addresses), !list.isEmpty {
+            addresses = list
+        } else {
+            var a = MachineAddress(id: id, url: try c.decodeIfPresent(String.self, forKey: .mobdUrl) ?? "")
+            a.clientId = try c.decodeIfPresent(String.self, forKey: .clientId)
+            a.needsPairing = try c.decodeIfPresent(Bool.self, forKey: .needsPairing) ?? (serverId == nil)
+            addresses = [a]
+        }
     }
 
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: Keys.self)
         try c.encode(id, forKey: .id)
         try c.encode(name, forKey: .name)
-        try c.encode(mobdUrl, forKey: .mobdUrl)
+        try c.encode(addresses, forKey: .addresses)
+        try c.encodeIfPresent(route, forKey: .route)
         try c.encodeIfPresent(liveQuality, forKey: .liveQuality)
         try c.encodeIfPresent(liveWebSocket, forKey: .liveWebSocket)
         try c.encodeIfPresent(serverId, forKey: .serverId)
-        try c.encodeIfPresent(clientId, forKey: .clientId)
-        try c.encode(needsPairing, forKey: .needsPairing)
     }
 }

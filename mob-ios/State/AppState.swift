@@ -58,7 +58,10 @@ final class AppState: MachineEvents {
     @ObservationIgnored private var healthTask: Task<Void, Never>?
     /// Global event streams, one per machine, so every Mac can notify (not only the active one).
     @ObservationIgnored private var watchers: [String: MachineWatcher] = [:]
-    @ObservationIgnored private var liveMachines = Set<String>()
+    /// Machines whose event stream is connected over the address in use.
+    private var liveMachines = Set<String>()
+    /// Machines whose event stream failed over the address in use (until it connects again).
+    private var downMachines = Set<String>()
 
     private let defaults = UserDefaults.standard
 
@@ -73,9 +76,11 @@ final class AppState: MachineEvents {
             UserDefaults.standard.set(true, forKey: "vncRemoved")
         }
         // Machines from before pairing, or whose token is gone, need pairing.
-        for i in stored.indices where !stored[i].needsPairing && stored[i].token == nil {
-            stored[i].needsPairing = true
-            changed = true
+        for i in stored.indices {
+            for j in stored[i].addresses.indices where !stored[i].addresses[j].needsPairing && stored[i].addresses[j].token == nil {
+                stored[i].addresses[j].needsPairing = true
+                changed = true
+            }
         }
         let saved = UserDefaults.standard.string(forKey: "activeMachine")
         machines = stored
@@ -137,10 +142,15 @@ final class AppState: MachineEvents {
         activate()
     }
 
-    /// Saves the name from the editor; address and pairing stay as stored.
+    /// Saves the name and address labels from the editor; addresses and pairing stay as stored.
     func save(_ m: Machine) {
         guard var stored = machines.first(where: { $0.id == m.id }) else { return }
         stored.name = m.name
+        for a in m.addresses {
+            guard let i = stored.addresses.firstIndex(where: { $0.id == a.id }) else { continue }
+            let l = (a.label ?? "").trimmingCharacters(in: .whitespaces)
+            stored.addresses[i].label = l.isEmpty ? nil : l
+        }
         store(stored)
     }
 
@@ -154,20 +164,52 @@ final class AppState: MachineEvents {
         syncWatchers()
     }
 
-    /// Saves a successful pairing (a new machine, or `existing` paired again) and switches to it.
-    /// The address and token change together, so the old token never goes to a new address.
+    /// Saves a successful pairing and switches to it: a new machine; a saved address of the same
+    /// office paired again; or a new address added to the office's row. Each address has its own
+    /// token, so a token never goes to an address it was not paired on.
     func completePairing(_ link: PairLink, _ result: PairResult, existing: Machine?, name: String) throws {
-        var m = existing ?? Machine(id: UUID().uuidString, name: name, mobdUrl: link.origin)
-        guard Keychain.set(result.token, for: m.tokenAccount) else {
+        var m = existing ?? machines.first { $0.serverId == result.serverId }
+            ?? Machine(id: UUID().uuidString, name: name, mobdUrl: link.origin)
+        let (paired, n, dropped) = m.pairing(origin: link.origin, serverId: result.serverId, clientId: result.clientId)
+        guard Keychain.set(result.token, for: paired.addresses[n].tokenAccount) else {
             throw PairError(message: "Paired, but the credential could not be stored in the Keychain. Run mobd link again and retry.")
         }
-        m.mobdUrl = link.origin
-        m.serverId = result.serverId
-        m.clientId = result.clientId
-        m.needsPairing = false
+        for account in dropped where account != paired.addresses[n].tokenAccount { Keychain.delete(account) }
+        m = paired
         Log.add("\(m.name): paired with \(link.origin)")
         store(m)
         selectMachine(m.id)
+    }
+
+    /// Uses another of the machine's addresses; the app never switches by itself.
+    func selectRoute(_ machine: String, _ address: String) {
+        guard let i = machines.firstIndex(where: { $0.id == machine }), machines[i].addresses.contains(where: { $0.id == address }),
+              machines[i].address?.id != address else { return }
+        machines[i].route = address
+        Log.add("\(machines[i].name): using \(machines[i].mobdUrl)")
+        liveMachines.remove(machine)
+        downMachines.remove(machine)
+        store(machines[i])
+    }
+
+    /// Removes one address from this phone; the machine goes with its last one.
+    func removeAddress(_ machine: String, _ address: String) {
+        guard var m = machines.first(where: { $0.id == machine }) else { return }
+        guard m.addresses.count > 1 else { return delete(m) }
+        Keychain.delete(m.addresses.first { $0.id == address }?.tokenAccount ?? "")
+        m.addresses.removeAll { $0.id == address }
+        if m.route == address { m.route = nil }
+        liveMachines.remove(m.id)
+        downMachines.remove(m.id)
+        store(m)
+    }
+
+    /// Whether the machine answers over the address in use, nil while not known yet: the active
+    /// one by its health check, the others by their event stream.
+    func reachable(_ m: Machine) -> Bool? {
+        if m.needsPairing { return nil }
+        if m.id == activeMachineId { return isConnected ? true : healthError != nil ? false : nil }
+        return liveMachines.contains(m.id) ? true : downMachines.contains(m.id) ? false : nil
     }
 
     /// mobd refused the machine's token: stop using it until the device is paired again.
@@ -188,7 +230,7 @@ final class AppState: MachineEvents {
     func delete(_ m: Machine) {
         machines.removeAll { $0.id == m.id }
         saveMachines()
-        Keychain.delete(m.tokenAccount)
+        for a in m.addresses { Keychain.delete(a.tokenAccount) }
         waiting[m.id] = nil
         defaults.removeObject(forKey: "session.\(m.id)")
         if m.id == activeMachineId {
@@ -322,6 +364,7 @@ final class AppState: MachineEvents {
             w.stop()
             watchers[id] = nil
             liveMachines.remove(id)
+            downMachines.remove(id)
         }
         for m in machines where watchers[m.id] == nil && !m.needsPairing {
             watchers[m.id] = MachineWatcher(m, client: client(for: m), events: self)
@@ -418,7 +461,7 @@ final class AppState: MachineEvents {
     }
 
     func onLive(_ m: Machine, _ live: Bool) {
-        if live { liveMachines.insert(m.id) } else { liveMachines.remove(m.id) }
+        if live { liveMachines.insert(m.id); downMachines.remove(m.id) } else { liveMachines.remove(m.id); downMachines.insert(m.id) }
         guard m.id == activeMachineId else { return }
         let was = chat.live
         chat.live = live
