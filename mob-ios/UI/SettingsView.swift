@@ -149,6 +149,9 @@ private struct MachineEditor: View {
     @State var machine: Machine
     @State private var quality: LiveQuality = .auto
     @State private var removing = false
+    /// The address being renamed, and the name typed so far.
+    @State private var renaming: MachineAddress?
+    @State private var newLabel = ""
     let onSave: (Machine) -> Void
     let onPairAgain: () -> Void
     let onRemove: () -> Void
@@ -161,6 +164,17 @@ private struct MachineEditor: View {
         self.onRemove = onRemove
     }
 
+    private func startRename(_ a: MachineAddress) {
+        newLabel = a.label ?? ""
+        renaming = a
+    }
+
+    private func removeAddress(_ a: MachineAddress) {
+        app.removeAddress(machine.id, a.id)
+        machine.addresses.removeAll { $0.id == a.id }
+        if !machine.addresses.contains(where: { $0.id == machine.route }) { machine.route = nil }
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -168,10 +182,11 @@ private struct MachineEditor: View {
                     TextField("Name (Office Mac)", text: $machine.name)
                 }
                 Section {
-                    ForEach($machine.addresses) { $a in
+                    ForEach(machine.addresses) { a in
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
-                                TextField(a.kind.rawValue, text: Binding(get: { a.label ?? "" }, set: { a.label = $0 }))
+                                Text(machine.label(a))
+                                Spacer()
                                 if a.id == machine.address?.id { Text("In use").font(.caption).foregroundStyle(.secondary) }
                             }
                             Text(a.url).font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -179,14 +194,18 @@ private struct MachineEditor: View {
                                 Label("Needs pairing", systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(Color.waiting)
                             }
                         }
-                        .deleteDisabled(machine.addresses.count < 2)
-                    }
-                    .onDelete { rows in
-                        for i in rows {
-                            app.removeAddress(machine.id, machine.addresses[i].id)
+                        .swipeActions {
+                            if machine.addresses.count > 1 {
+                                Button("Remove", role: .destructive) { removeAddress(a) }
+                            }
+                            Button("Rename") { startRename(a) }.tint(.accentColor)
                         }
-                        machine.addresses.remove(atOffsets: rows)
-                        if !machine.addresses.contains(where: { $0.id == machine.route }) { machine.route = nil }
+                        .contextMenu {
+                            Button { startRename(a) } label: { Label("Rename", systemImage: "pencil") }
+                            if machine.addresses.count > 1 {
+                                Button(role: .destructive) { removeAddress(a) } label: { Label("Remove", systemImage: "trash") }
+                            }
+                        }
                     }
                     Button("Add address…") {
                         onPairAgain()
@@ -195,7 +214,7 @@ private struct MachineEditor: View {
                 } header: {
                     Text("Addresses")
                 } footer: {
-                    Text("Each address is paired on its own, so the device credential never goes to an address it was not paired on. To add one, run mobd link (or mobd link --lan) on the office Mac and scan its code. Choose which address Mob uses by long-pressing the machine in the list.")
+                    Text("Each address is paired on its own, so the device credential never goes to an address it was not paired on. To add one, run mobd link (or mobd link --lan) on the office Mac and scan its code. Swipe or long-press an address to rename or remove it; long-press the machine in the list to choose which address Mob uses.")
                 }
                 Section {
                     NavigationLink { AgentSettingsScreen(machine: machine) } label: { Label("Agents", systemImage: "cpu") }
@@ -218,6 +237,18 @@ private struct MachineEditor: View {
                 } footer: {
                     Text("Only removes it from this phone. Chats stay on the office Mac.")
                 }
+            }
+            .alert("Rename address", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+                TextField(renaming?.kind.rawValue ?? "", text: $newLabel)
+                Button("Cancel", role: .cancel) {}
+                Button("Rename") {
+                    if let r = renaming, let i = machine.addresses.firstIndex(where: { $0.id == r.id }) {
+                        let l = newLabel.trimmingCharacters(in: .whitespaces)
+                        machine.addresses[i].label = l.isEmpty ? nil : l
+                    }
+                }
+            } message: {
+                Text("\(renaming?.url ?? "")\nLeave empty to show \(renaming?.kind.rawValue ?? "").")
             }
             .confirmationDialog("Remove \(machine.name)?", isPresented: $removing, titleVisibility: .visible) {
                 Button("Remove", role: .destructive) {
