@@ -15,6 +15,7 @@ final class AppState: MachineEvents {
 
     private(set) var health: Health?
     private(set) var isConnected = false
+    private(set) var isCheckingHealth = false
     /// Why the last health check failed; nil when connected or not checked yet.
     private(set) var healthError: String?
 
@@ -108,6 +109,7 @@ final class AppState: MachineEvents {
         let m = activeMachine
         defaults.set(m?.id, forKey: "activeMachine")
         apiClient = m.map(client(for:)) ?? APIClient(baseURL: "", token: nil)
+        isCheckingHealth = false
         health = nil
         isConnected = false
         healthError = nil
@@ -195,6 +197,7 @@ final class AppState: MachineEvents {
     func checkHealth() { Task { await checkHealthNow() } }
 
     private func checkHealthNow() async {
+        guard !isCheckingHealth else { return }
         guard let m = activeMachine else {
             isConnected = false
             health = nil
@@ -207,6 +210,8 @@ final class AppState: MachineEvents {
             return
         }
         let client = apiClient
+        isCheckingHealth = true
+        defer { if client === apiClient { isCheckingHealth = false } }
         do {
             let h = try await client.health()
             guard client === apiClient else { return }

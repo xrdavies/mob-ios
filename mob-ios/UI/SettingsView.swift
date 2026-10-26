@@ -119,7 +119,14 @@ struct SettingsView: View {
                     }
                 }
             }
-            Button("Test connection") { app.checkHealth() }
+            Button { app.checkHealth() } label: {
+                HStack {
+                    Text(app.isCheckingHealth ? "Testing connection…" : "Test connection")
+                    if app.isCheckingHealth { Spacer(); ProgressView().accessibilityHidden(true) }
+                }
+            }
+            .disabled(app.isCheckingHealth || app.activeMachine?.needsPairing == true)
+            .accessibilityIdentifier("testConnection")
         }
     }
 }
