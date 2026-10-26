@@ -67,11 +67,13 @@ struct Composer: View {
                 } else if chat.currentId != nil, let runner, (h?.runners?.count ?? 0) > 1 {
                     Text(runner.title).font(.caption).foregroundStyle(.secondary)
                 }
-                if canOptions && !models.isEmpty {
-                    option("memorychip", model ?? "Default model", "Default model", models.map { ($0, $0) }, model) { app.setTurnPref("\(runnerKey).model", $0) }
+                let defaultModel = defaultLabel("model", runner?.defaultModel)
+                let defaultEffort = defaultLabel("effort", runner?.defaultEffort)
+                if canOptions && (!models.isEmpty || runner?.defaultModel != nil) {
+                    option("memorychip", model ?? defaultModel, defaultModel, models.map { ($0, $0) }, model) { app.setTurnPref("\(runnerKey).model", $0) }
                 }
                 if canOptions && !efforts.isEmpty {
-                    option("brain", effort ?? "Effort", "Default effort", efforts.map { ($0, $0) }, effort) { app.setTurnPref("\(runnerKey).effort", $0) }
+                    option("brain", effort ?? defaultEffort, defaultEffort, efforts.map { ($0, $0) }, effort) { app.setTurnPref("\(runnerKey).effort", $0) }
                 }
                 Spacer()
                 if busy {

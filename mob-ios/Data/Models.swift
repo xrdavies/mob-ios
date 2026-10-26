@@ -56,13 +56,23 @@ struct Runner: Codable, Hashable {
     let available: Bool?
     let detail: String?
     let isDefault: Bool?
+    /// What the agent uses when a turn picks none (mobd reads the agent's own settings); nil when
+    /// unset there or from an older mobd.
+    var defaultModel: String? = nil
+    var defaultEffort: String? = nil
 
     var title: String { label ?? name }
 
     enum CodingKeys: String, CodingKey {
-        case name, label, models, efforts, images, resume, cost, steer, available, detail
+        case name, label, models, efforts, images, resume, cost, steer, available, detail, defaultModel, defaultEffort
         case isDefault = "default"
     }
+}
+
+/// The menu entry for "no choice": names the agent's default when mobd reports it.
+func defaultLabel(_ what: String, _ value: String?) -> String {
+    guard let value, !value.isEmpty else { return "Default \(what)" }
+    return "Default (\(value))"
 }
 
 enum Status {

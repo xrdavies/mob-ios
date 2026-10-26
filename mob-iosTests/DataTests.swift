@@ -116,6 +116,14 @@ final class DataTests: XCTestCase {
         XCTAssertFalse(APIClient.shouldRetry(APIError(message: "x", status: 500), method: "GET"))
     }
 
+    func testDefaultChoiceNamesTheAgentsDefault() throws {
+        let r = try APIClient.decoder.decode(Runner.self, from: Data(#"{"name":"codex","defaultModel":"gpt-6-astra","defaultEffort":"xhigh"}"#.utf8))
+        XCTAssertEqual(defaultLabel("effort", r.defaultEffort), "Default (xhigh)")
+        XCTAssertEqual(defaultLabel("model", r.defaultModel), "Default (gpt-6-astra)")
+        let old = try APIClient.decoder.decode(Runner.self, from: Data(#"{"name":"claude"}"#.utf8))
+        XCTAssertEqual(defaultLabel("effort", old.defaultEffort), "Default effort")
+    }
+
     func testGatewayErrorsFromTheProxyAreExplained() {
         XCTAssertEqual(APIClient.proxyMessage(502), "The office Mac answered, but mobd is not running there. Start it with mobd start.")
         XCTAssertEqual(APIClient.proxyMessage(504), "mobd did not answer in time")
