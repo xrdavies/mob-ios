@@ -29,10 +29,12 @@ struct RouteLine: View {
     }
 }
 
-/// "Use LAN ✓" / "Use Remote" for a machine with more than one address.
+/// "Use LAN ✓" / "Use Remote" for a machine with more than one address. In a route submenu
+/// (`short`) the items are just "LAN ✓" / "Remote", with the host under each.
 struct RouteMenuItems: View {
     @Environment(AppState.self) private var app
     let machine: Machine
+    var short = false
 
     var body: some View {
         if machine.addresses.count > 1 {
@@ -41,7 +43,9 @@ struct RouteMenuItems: View {
                     app.selectRoute(machine.id, a.id)
                     app.selectMachine(machine.id)
                 } label: {
-                    if a.id == machine.address?.id { Label("Use \(machine.label(a))", systemImage: "checkmark") } else { Text("Use \(machine.label(a))") }
+                    let title = short ? machine.label(a) : "Use \(machine.label(a))"
+                    if a.id == machine.address?.id { Label(title, systemImage: "checkmark") } else { Text(title) }
+                    if short { Text(Machine.host(a.url)) }
                 }
             }
         }

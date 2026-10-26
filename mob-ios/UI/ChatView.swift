@@ -128,7 +128,7 @@ struct ChatView: View {
                 if let m = app.activeMachine, m.addresses.count > 1, let a = m.address {
                     // Two ways to reach the Mac: show which one, and let the user switch here.
                     Menu {
-                        RouteMenuItems(machine: m)
+                        RouteMenuItems(machine: m, short: true)
                     } label: {
                         Text("\(m.name) · via \(m.label(a))").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
@@ -363,10 +363,17 @@ struct SessionList: View {
                 Button { app.selectMachine(m.id) } label: {
                     let title = m.name + ((app.queued[m.id] ?? 0) > 0 ? " · queue \(app.queued[m.id]!)" : "")
                     if m.id == app.activeMachineId { Label(title, systemImage: "checkmark") } else { Text(title) }
+                    // The route belongs to the machine: a subtitle, not an item of its own.
+                    if m.addresses.count > 1, let a = m.address { Text("via \(m.label(a))") }
                 }
             }
-            if let m = app.activeMachine, m.addresses.count > 1 {
-                Section("\(m.name) route") { RouteMenuItems(machine: m) }
+            if let m = app.activeMachine, m.addresses.count > 1, let a = m.address {
+                Divider()
+                Menu {
+                    RouteMenuItems(machine: m, short: true)
+                } label: {
+                    Label("Route: \(m.label(a))", systemImage: "point.3.connected.trianglepath.dotted")
+                }
             }
             Divider()
             Button {
