@@ -25,8 +25,20 @@ struct Composer: View {
         let models = runner?.models ?? h?.models ?? []
         let efforts = runner?.efforts ?? h?.efforts ?? []
         let canOptions = h?.supports("taskOptions") == true
-        let model = app.turnPrefs["\(runnerKey).model"].flatMap { models.isEmpty || models.contains($0) ? $0 : nil }
-        let effort = app.turnPrefs["\(runnerKey).effort"].flatMap { efforts.contains($0) ? $0 : nil }
+        // An open chat shows and changes its conversation's model and effort (shared by every
+        // device); a new chat keeps a draft on this device until it exists.
+        let hasSettings = h?.supports("settings") == true
+        let shown = TurnSettings.shown(settings: hasSettings, session: chat.currentId != nil ? chat.detail?.session : nil,
+                                       draftModel: app.turnPrefs["\(runnerKey).model"], draftEffort: app.turnPrefs["\(runnerKey).effort"])
+        let model: String? = shown.model.isEmpty ? nil : shown.model
+        let effort: String? = shown.effort.isEmpty ? nil : shown.effort
+        let choose = { (key: String, value: String?) in
+            if hasSettings && chat.currentId != nil {
+                chat.setTurnSettings(model: key == "model" ? value ?? "" : nil, effort: key == "effort" ? value ?? "" : nil)
+            } else {
+                app.setTurnPref("\(runnerKey).\(key)", value)
+            }
+        }
         let canUpload = h?.supports("uploads") == true && runner?.images != false
         let task = chat.detail?.current
         let busy = chat.detail?.busy == true
@@ -70,10 +82,10 @@ struct Composer: View {
                 let defaultModel = defaultLabel("model", runner?.defaultModel)
                 let defaultEffort = defaultLabel("effort", runner?.defaultEffort)
                 if canOptions && (!models.isEmpty || runner?.defaultModel != nil) {
-                    option("memorychip", model ?? defaultModel, defaultModel, models.map { ($0, $0) }, model) { app.setTurnPref("\(runnerKey).model", $0) }
+                    option("memorychip", model ?? defaultModel, defaultModel, TurnSettings.menuModels(models, current: shown.model).map { ($0, $0) }, model) { choose("model", $0) }
                 }
                 if canOptions && !efforts.isEmpty {
-                    option("brain", effort ?? defaultEffort, defaultEffort, efforts.map { ($0, $0) }, effort) { app.setTurnPref("\(runnerKey).effort", $0) }
+                    option("brain", effort ?? defaultEffort, defaultEffort, efforts.map { ($0, $0) }, effort) { choose("effort", $0) }
                 }
                 Spacer()
                 if busy {
@@ -93,8 +105,10 @@ struct Composer: View {
                     .accessibilityLabel("Stop")
                 } else {
                     Button {
+                        let sent = TurnSettings.sent(settings: hasSettings, newChat: chat.currentId == nil, shown: shown, efforts: efforts)
                         send(canSteer: false, busy: false, uploading: uploading, runner: chat.currentId == nil ? runner?.name : nil,
-                             model: canOptions ? model : nil, effort: canOptions ? effort : nil)
+                             model: canOptions ? sent.model : nil, effort: canOptions ? sent.effort : nil,
+                             clearDraft: hasSettings && chat.currentId == nil ? (m, runnerKey) : nil)
                     } label: {
                         if chat.sending { ProgressView() } else { Image(systemName: "arrow.up").font(.body.weight(.semibold)) }
                     }
@@ -115,7 +129,8 @@ struct Composer: View {
         return "Ask Mob to do something on \(app.activeMachine?.name ?? "the office Mac")…"
     }
 
-    private func send(canSteer: Bool, busy: Bool, uploading: Bool, runner: String?, model: String?, effort: String?) {
+    private func send(canSteer: Bool, busy: Bool, uploading: Bool, runner: String?, model: String?, effort: String?,
+                      clearDraft: (machine: String, runnerKey: String)? = nil) {
         let draft = draft
         let prompt = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty, !draft.sending, !chat.sending else { return }
@@ -128,8 +143,10 @@ struct Composer: View {
         guard !busy, !uploading, draft.attachmentsReady else { return }
         // Keep the draft until accepted, so a failed request never loses text or images.
         draft.beginSending()
-        chat.send(prompt, runner: runner, model: model, effort: effort, attachments: draft.attachments.compactMap(\.uploadId)) {
-            draft.finishSending($0)
+        chat.send(prompt, runner: runner, model: model, effort: effort, attachments: draft.attachments.compactMap(\.uploadId)) { ok in
+            draft.finishSending(ok)
+            // The conversation has its settings now; the next new chat starts from the defaults.
+            if ok, let clearDraft { app.clearTurnPrefs(machine: clearDraft.machine, runnerKey: clearDraft.runnerKey) }
         }
     }
 

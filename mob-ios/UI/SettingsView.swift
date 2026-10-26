@@ -51,6 +51,13 @@ struct SettingsView: View {
                     }
                     Button { pairing = PairRequest(machine: nil) } label: { Label("Add machine", systemImage: "plus") }
                 }
+                if let m = app.activeMachine, app.health?.supports("settings") == true {
+                    Section {
+                        NavigationLink { AgentSettingsScreen() } label: { Label("Agents on \(m.name)", systemImage: "cpu") }
+                    } footer: {
+                        Text("Default agent, models, default model and effort, and permissions, for every device.")
+                    }
+                }
                 Section {
                     if !notificationsAllowed {
                         Button("Turn on notifications") { openURL(URL(string: UIApplication.openNotificationSettingsURLString)!) }

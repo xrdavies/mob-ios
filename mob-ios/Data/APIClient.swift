@@ -181,12 +181,25 @@ final class APIClient {
         try await get("sessions/\(id)", query: since.map { ["since": String($0)] } ?? [:])
     }
 
-    func patchSession(_ id: String, title: String? = nil, pinned: Bool? = nil, archived: Bool? = nil) async throws {
+    /// model / effort set the conversation's settings; "" returns to the machine default.
+    @discardableResult
+    func patchSession(_ id: String, title: String? = nil, pinned: Bool? = nil, archived: Bool? = nil,
+                      model: String? = nil, effort: String? = nil) async throws -> Session {
         var body: [String: Any] = [:]
         if let title { body["title"] = title }
         if let pinned { body["pinned"] = pinned }
         if let archived { body["archived"] = archived }
-        _ = try await send("PATCH", "sessions/\(id)", body: body)
+        if let model { body["model"] = model }
+        if let effort { body["effort"] = effort }
+        return try APIClient.decoder.decode(Session.self, from: await send("PATCH", "sessions/\(id)", body: body))
+    }
+
+    func settings() async throws -> MachineSettingsInfo { try await get("settings") }
+
+    /// Replaces the machine settings; APIError code "settings_changed" when another device saved first.
+    func saveSettings(_ s: MachineSettings) async throws -> MachineSettingsInfo {
+        let body = try JSONSerialization.jsonObject(with: JSONEncoder().encode(s)) as? [String: Any] ?? [:]
+        return try APIClient.decoder.decode(MachineSettingsInfo.self, from: await send("PUT", "settings", body: body))
     }
 
     func deleteSession(_ id: String) async throws { _ = try await send("DELETE", "sessions/\(id)") }

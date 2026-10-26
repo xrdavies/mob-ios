@@ -16,6 +16,8 @@ protocol MachineEvents: AnyObject {
     func onUnauthorized(_ m: Machine)
     /// A conversation desktop, memory or disk change (Linux mobd).
     func onDesktop(_ m: Machine, _ event: DesktopEvent)
+    /// The machine settings changed on some device.
+    func onSettings(_ m: Machine)
 }
 
 /// Follows one machine's GET /events (session summaries) and remembers the last summary of
@@ -64,6 +66,8 @@ final class MachineWatcher {
                             }
                         case "desktop", "memory", "disk":
                             if let ev = DesktopEvent.parse(type: e.type, data: e.data) { events.onDesktop(machine, ev) }
+                        case "settings":
+                            events.onSettings(machine)
                         case "reset":
                             Log.add("\(machine.name): events reset, refetching")
                             try await self.seed(client)

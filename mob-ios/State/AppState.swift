@@ -41,6 +41,8 @@ final class AppState: MachineEvents {
     /// Composer choices, remembered per machine ("<machine>.runner") and per machine and runner
     /// ("<machine>/<runner>.model" / ".effort"), like the desktop app.
     private(set) var turnPrefs: [String: String]
+    /// Goes up when another device changes the machine settings, so open settings reload.
+    private(set) var settingsTick = 0
 
     private(set) var apiClient: APIClient
     let chat = ChatStore()
@@ -78,7 +80,9 @@ final class AppState: MachineEvents {
         let saved = UserDefaults.standard.string(forKey: "activeMachine")
         machines = stored
         activeMachineId = stored.contains { $0.id == saved } ? saved : stored.first?.id
-        turnPrefs = (UserDefaults.standard.dictionary(forKey: "turnPrefs") as? [String: String]) ?? [:]
+        // Model and effort are mobd settings now (machine and conversation); drafts stay in memory.
+        turnPrefs = [:]
+        UserDefaults.standard.removeObject(forKey: "turnPrefs")
         apiClient = APIClient(baseURL: "", token: nil)
         if changed { saveMachines() }
         chat.onUnauthorized = { [weak self] id in self?.markNeedsPairing(id) }
@@ -234,9 +238,14 @@ final class AppState: MachineEvents {
         }
     }
 
+    /// A new chat's choice on this device, until the chat exists (keys "<machine>.runner",
+    /// "<machine>/<runner>.model", ".effort"). In memory only.
     func setTurnPref(_ key: String, _ value: String?) {
         turnPrefs[key] = value?.isEmpty == false ? value : nil
-        defaults.set(turnPrefs, forKey: "turnPrefs")
+    }
+
+    func clearTurnPrefs(machine: String, runnerKey: String) {
+        for k in ["\(machine).runner", "\(runnerKey).model", "\(runnerKey).effort"] { turnPrefs[k] = nil }
     }
 
     // MARK: - Live view
@@ -385,6 +394,12 @@ final class AppState: MachineEvents {
     }
 
     func onQueue(_ m: Machine, _ queued: Int) { self.queued[m.id] = queued }
+
+    func onSettings(_ m: Machine) {
+        guard m.id == activeMachineId else { return }
+        settingsTick += 1
+        checkHealth()
+    }
 
     func onUnauthorized(_ m: Machine) { markNeedsPairing(m.id) }
 

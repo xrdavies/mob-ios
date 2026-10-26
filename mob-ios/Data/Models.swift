@@ -60,11 +60,12 @@ struct Runner: Codable, Hashable {
     /// unset there or from an older mobd.
     var defaultModel: String? = nil
     var defaultEffort: String? = nil
+    var permissions: String? = nil
 
     var title: String { label ?? name }
 
     enum CodingKeys: String, CodingKey {
-        case name, label, models, efforts, images, resume, cost, steer, available, detail, defaultModel, defaultEffort
+        case name, label, models, efforts, images, resume, cost, steer, available, detail, defaultModel, defaultEffort, permissions
         case isDefault = "default"
     }
 }
@@ -127,6 +128,9 @@ struct Session: Codable, Identifiable, Hashable {
     let id: String
     var title: String?
     var runner: String?
+    /// The conversation's model and effort (mobd with "settings"); nil = machine default.
+    var model: String?
+    var effort: String?
     var resumeId: String?
     var activeTaskId: String?
     var status: String?

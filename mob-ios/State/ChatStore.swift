@@ -320,6 +320,8 @@ final class ChatStore {
         d.session.archived = s.archived
         d.session.activeTaskId = s.activeTaskId
         d.session.updatedAt = s.updatedAt
+        d.session.model = s.model
+        d.session.effort = s.effort
         detail = d
         // A new turn (from another device) or a status change the turn stream did not deliver.
         let newTurn = s.activeTaskId != nil && s.activeTaskId != current?.id
@@ -416,6 +418,16 @@ final class ChatStore {
             try await client.answer(q, answer: answer, approved: approved)
             ok = true
             if gen == self.generation, self.currentId == sessionId { self.reload() }
+        }
+    }
+
+    /// Sets the open conversation's model or effort ("" = machine default), for every device.
+    func setTurnSettings(model: String? = nil, effort: String? = nil) {
+        guard let id = currentId else { return }
+        let gen = generation
+        run { client in
+            let s = try await client.patchSession(id, model: model, effort: effort)
+            if gen == self.generation { self.apply(s) }
         }
     }
 
