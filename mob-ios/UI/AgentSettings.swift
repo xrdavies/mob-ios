@@ -57,12 +57,14 @@ struct AgentSettingsScreen: View {
     private func agentSection(_ name: String, _ agent: MachineSettingsInfo.Agent, _ a: AgentSettings) -> some View {
         Section {
             ForEach(a.models, id: \.self) { m in
-                Text(m).font(.body.monospaced())
-                    .swipeActions {
-                        Button("Remove", role: .destructive) {
-                            update(name) { $0.models.removeAll { $0 == m }; if $0.defaultModel == m { $0.defaultModel = "" } }
-                        }
-                    }
+                let remove = { update(name) { $0.models.removeAll { $0 == m }; if $0.defaultModel == m { $0.defaultModel = "" } } }
+                HStack {
+                    Text(m).font(.body.monospaced())
+                    Spacer()
+                    Button(action: remove) { Image(systemName: "minus.circle.fill").foregroundStyle(.red) }
+                        .buttonStyle(.borderless).accessibilityLabel("Remove \(m)")
+                }
+                .swipeActions { Button("Remove", role: .destructive, action: remove) }
             }
             HStack {
                 TextField("Add a model ID", text: Binding(get: { adding[name] ?? "" }, set: { adding[name] = $0 }))
@@ -85,7 +87,7 @@ struct AgentSettingsScreen: View {
         } header: {
             Text(label(name))
         } footer: {
-            Text(a.models.isEmpty ? "No models listed: chats use the default model." : "Swipe a model to remove it.")
+            Text(a.models.isEmpty ? "No models listed: chats use the default model." : "Changes apply after Save.")
         }
     }
 
