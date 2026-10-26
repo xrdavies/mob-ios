@@ -10,6 +10,8 @@ struct Composer: View {
     @Environment(AppState.self) private var app
     @Bindable var draft: ChatDraft
     @State private var picked: [PhotosPickerItem] = []
+    /// The agent whose settings the model menu's "Edit models…" opened.
+    @State private var editingAgent: String?
     @FocusState private var focused: Bool
 
     private var chat: ChatStore { app.chat }
@@ -80,8 +82,9 @@ struct Composer: View {
                 }
                 let defaultModel = defaultLabel("model", runner?.defaultModel)
                 let defaultEffort = defaultLabel("effort", runner?.defaultEffort)
-                if canOptions && (!models.isEmpty || runner?.defaultModel != nil) {
-                    option("memorychip", model ?? defaultModel, defaultModel, TurnSettings.menuModels(models, current: shown.model).map { ($0, $0) }, model) { choose("model", $0) }
+                if canOptions && runner != nil {
+                    option("memorychip", model ?? defaultModel, defaultModel, TurnSettings.menuModels(models, current: shown.model).map { ($0, $0) }, model,
+                           edit: { editingAgent = runner?.name ?? "" }) { choose("model", $0) }
                 }
                 if canOptions && !efforts.isEmpty {
                     option("brain", effort ?? defaultEffort, defaultEffort, efforts.map { ($0, $0) }, effort) { choose("effort", $0) }
@@ -122,6 +125,15 @@ struct Composer: View {
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(.bar)
         .onChange(of: picked) { load(picked) }
+        // "Edit models…": this machine's agent settings, at the chat's agent.
+        .sheet(isPresented: Binding(get: { editingAgent != nil }, set: { if !$0 { editingAgent = nil } })) {
+            if let m = app.activeMachine {
+                NavigationStack {
+                    AgentSettingsScreen(machine: m, focus: editingAgent)
+                        .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { editingAgent = nil } } }
+                }
+            }
+        }
     }
 
     private func placeholder(canSteer: Bool, busy: Bool) -> String {
@@ -200,8 +212,11 @@ struct Composer: View {
     }
 
     private func option(_ icon: String, _ label: String, _ defaultLabel: String?, _ options: [(String, String)], _ value: String?,
-                        _ onChange: @escaping (String?) -> Void) -> some View {
+                        edit: (() -> Void)? = nil, _ onChange: @escaping (String?) -> Void) -> some View {
         Menu {
+            if let edit {
+                Section { Button("Edit models…", systemImage: "pencil", action: edit) }
+            }
             if let defaultLabel {
                 Button { onChange(nil) } label: { if value == nil { Label(defaultLabel, systemImage: "checkmark") } else { Text(defaultLabel) } }
             }

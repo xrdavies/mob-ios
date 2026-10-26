@@ -1,9 +1,12 @@
 import SwiftUI
 
-/// settings.json, shared by every device: the default agent, and per agent its models, default
-/// model and effort, and permissions.
+/// One machine's agents (its mobd's settings.json, shared by every device): the default agent,
+/// and per agent its models, default model and effort, and permissions. Works for any paired
+/// machine, not only the active one; `focus` scrolls to an agent.
 struct AgentSettingsScreen: View {
     @Environment(AppState.self) private var app
+    let machine: Machine
+    var focus: String? = nil
     @State private var info: MachineSettingsInfo?
     @State private var edit: MachineSettings?
     @State private var adding: [String: String] = [:]
@@ -18,9 +21,14 @@ struct AgentSettingsScreen: View {
     /// An empty default sends none: the agent's own applies.
     private func agentDefault(_ value: String?) -> String { value.map { "Agent's default (\($0))" } ?? "Agent's default" }
 
+    private var client: APIClient { app.client(for: machine) }
+
     var body: some View {
+        ScrollViewReader { proxy in
         Form {
-            if let info, let edit {
+            if machine.needsPairing {
+                Text("Pair \(machine.name) again to change its agents.").foregroundStyle(.secondary)
+            } else if let info, let edit {
                 Section {
                     Picker("Default agent", selection: binding(edit.defaultAgent) { s, v in s.defaultAgent = v }) {
                         ForEach(info.agents.keys.sorted(), id: \.self) { Text(label($0)).tag($0) }
@@ -29,7 +37,7 @@ struct AgentSettingsScreen: View {
                     Text("Shared by every device paired with this machine. Each chat keeps the model and effort it started with; change them for one chat in its message box.")
                 }
                 ForEach(info.agents.keys.sorted(), id: \.self) { name in
-                    if let a = edit.agents[name], let agent = info.agents[name] { agentSection(name, agent, a) }
+                    if let a = edit.agents[name], let agent = info.agents[name] { agentSection(name, agent, a).id(name) }
                 }
                 if let message {
                     Section { Text(message.text).foregroundStyle(message.error ? .red : .green) }
@@ -40,7 +48,13 @@ struct AgentSettingsScreen: View {
                 ProgressView()
             }
         }
-        .navigationTitle("Agents")
+        .onChange(of: info != nil) { _, loaded in
+            // Opened from a chat's model menu: bring that agent into view.
+            if loaded, let focus { withAnimation { proxy.scrollTo(focus, anchor: .top) } }
+        }
+        }
+        .navigationTitle("\(machine.name) · Agents")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 // The button itself shows the save: Saving…, then ✓ Saved, then greyed out until a change.
@@ -60,7 +74,7 @@ struct AgentSettingsScreen: View {
             Button("Allow and save", role: .destructive) { save(confirmed: true) }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("\((confirm ?? []).map(label).joined(separator: ", ")) will run commands and edit files on \(app.activeMachine?.name ?? "the office Mac") without asking you first.")
+            Text("\((confirm ?? []).map(label).joined(separator: ", ")) will run commands and edit files on \(machine.name) without asking you first.")
         }
         .task(id: app.settingsTick) { await load() }
     }
@@ -130,10 +144,12 @@ struct AgentSettingsScreen: View {
 
     private func load() async {
         do {
-            let v = try await app.apiClient.settings()
+            let v = try await client.settings()
             info = v
             // Keep local edits unless another device saved meanwhile.
             if edit == nil || edit?.rev != v.settings.rev { edit = v.settings }
+        } catch let e as URLError {
+            message = ("Connect to \(machine.name) to change its agents. (\(readable(e)))", true)
         } catch {
             message = (readable(error), true)
         }
@@ -147,7 +163,7 @@ struct AgentSettingsScreen: View {
         Task {
             defer { saving = false }
             do {
-                let saved = try await app.apiClient.saveSettings(edit)
+                let saved = try await client.saveSettings(edit)
                 self.info = saved
                 self.edit = saved.settings
                 message = nil

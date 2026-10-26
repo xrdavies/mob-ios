@@ -51,13 +51,6 @@ struct SettingsView: View {
                     }
                     Button { pairing = PairRequest(machine: nil) } label: { Label("Add machine", systemImage: "plus") }
                 }
-                if let m = app.activeMachine, app.health != nil {
-                    Section {
-                        NavigationLink { AgentSettingsScreen() } label: { Label("Agents on \(m.name)", systemImage: "cpu") }
-                    } footer: {
-                        Text("Default agent, models, default model and effort, and permissions, for every device.")
-                    }
-                }
                 Section {
                     if !notificationsAllowed {
                         Button("Turn on notifications") { openURL(URL(string: UIApplication.openNotificationSettingsURLString)!) }
@@ -173,8 +166,15 @@ private struct MachineEditor: View {
                         onPairAgain()
                         dismiss()
                     }
+                } header: {
+                    Text("Connection")
                 } footer: {
                     Text("The address comes from the pairing link. To change it, run mobd link --url <new address> on the office Mac and pair again; the device credential is never sent to an unverified address.")
+                }
+                Section {
+                    NavigationLink { AgentSettingsScreen(machine: machine) } label: { Label("Agents", systemImage: "cpu") }
+                } footer: {
+                    Text("Default agent, models, default model and effort, and permissions on this machine, shared by every device.")
                 }
                 Section {
                     Picker("Quality", selection: $quality) {
@@ -201,7 +201,7 @@ private struct MachineEditor: View {
             }
             // Like the desktop app: the quality applies at once (Save only renames).
             .onChange(of: quality) { _, new in app.setLiveQuality(machine.id, new) }
-            .navigationTitle("Edit machine")
+            .navigationTitle(machine.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
