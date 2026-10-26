@@ -126,37 +126,29 @@ final class DataTests: XCTestCase {
 
     func testOpenChatShowsItsConversationSettingsAndNewChatItsDraft() throws {
         let session = try APIClient.decoder.decode(Session.self, from: Data(#"{"id":"s","model":"gpt-5.4","effort":"high"}"#.utf8))
-        XCTAssertEqual(TurnSettings.shown(settings: true, session: session, draftModel: "x", draftEffort: nil), TurnChoice(model: "gpt-5.4", effort: "high"))
-        XCTAssertEqual(TurnSettings.shown(settings: true, session: Session(id: "s"), draftModel: "x", draftEffort: nil), TurnChoice(),
+        XCTAssertEqual(TurnSettings.shown(session: session, draftModel: "x", draftEffort: nil), TurnChoice(model: "gpt-5.4", effort: "high"))
+        XCTAssertEqual(TurnSettings.shown(session: Session(id: "s"), draftModel: "x", draftEffort: nil), TurnChoice(),
                        "a conversation without settings follows the defaults")
-        XCTAssertEqual(TurnSettings.shown(settings: true, session: nil, draftModel: nil, draftEffort: "low"), TurnChoice(effort: "low"))
-        XCTAssertEqual(TurnSettings.shown(settings: false, session: session, draftModel: "o4", draftEffort: nil), TurnChoice(model: "o4"))
-        let shown = TurnChoice(model: "opus", effort: "high")
-        XCTAssertNil(TurnSettings.sent(settings: true, newChat: false, shown: shown, efforts: ["high"]).model)
-        XCTAssertEqual(TurnSettings.sent(settings: true, newChat: true, shown: shown, efforts: ["high"]).effort, "high")
-        XCTAssertNil(TurnSettings.sent(settings: false, newChat: false, shown: TurnChoice(effort: "max"), efforts: ["high"]).effort)
+        XCTAssertEqual(TurnSettings.shown(session: nil, draftModel: nil, draftEffort: "low"), TurnChoice(effort: "low"))
         XCTAssertEqual(TurnSettings.menuModels(["a"], current: "b"), ["a", "b"])
     }
 
-    func testSettingsEditsDropEmptyValuesAndBypassNeedsConfirmation() throws {
-        var s = MachineSettings(rev: 2)
-        s = TurnSettings.with(s, agent: "codex") { $0.models = ["gpt-6-astra"]; $0.defaultEffort = "high" }
-        XCTAssertEqual(s.agents?["codex"], AgentSettings(models: ["gpt-6-astra"], defaultEffort: "high"))
-        s = TurnSettings.with(s, agent: "codex") { $0.models = []; $0.defaultEffort = "" }
-        XCTAssertNil(s.agents?["codex"])
+    func testSettingsFileEditsAndTurningApprovalOffNeedsConfirmation() throws {
+        let json = #"""
+        {"settings":{"rev":2,"defaultAgent":"codex","agents":{
+           "codex":{"models":[],"defaultModel":"","defaultEffort":"","permissions":"approve"},
+           "claude":{"models":["opus"],"defaultModel":"","defaultEffort":"","permissions":"bypass"}}},
+         "agents":{"codex":{"label":"Codex","efforts":["low","high"],"agentDefaultEffort":"xhigh"},
+                   "claude":{"label":"Claude Code","efforts":["low","max"]}}}
+        """#
+        let info = try APIClient.decoder.decode(MachineSettingsInfo.self, from: Data(json.utf8))
+        XCTAssertEqual(info.agents["codex"]?.agentDefaultEffort, "xhigh")
+        let next = TurnSettings.with(info.settings, agent: "codex") { $0.models = ["gpt-6-astra"]; $0.defaultEffort = "high" }
+        XCTAssertEqual(next.agents["codex"], AgentSettings(models: ["gpt-6-astra"], defaultEffort: "high", permissions: "approve"))
         XCTAssertEqual(try TurnSettings.add(model: " b ", to: ["a"]).get(), ["a", "b"])
         XCTAssertThrowsError(try TurnSettings.add(model: "has space", to: []).get())
-        let json = #"""
-        {"settings":{"rev":2},"defaultAgent":"codex","defaultAgentFrom":"config","fallbackDefaultAgent":"codex",
-         "agents":{"codex":{"models":[],"modelsFrom":"config","defaultModelFrom":"builtin","defaultEffortFrom":"builtin",
-                            "permissions":"approve","permissionsFrom":"app","efforts":["low","high"],
-                            "fallback":{"models":[],"modelsFrom":"config","defaultModelFrom":"builtin","defaultEffortFrom":"builtin",
-                                        "permissions":"bypass","permissionsFrom":"config","efforts":["low","high"]}}}}
-        """#
-        let view = try APIClient.decoder.decode(MachineSettingsInfo.self, from: Data(json.utf8))
-        // Clearing the app's "approve" returns to the config's "bypass": that needs a confirmation.
-        XCTAssertEqual(TurnSettings.newlyUnguarded(view, MachineSettings(rev: 2)), ["codex"])
-        XCTAssertEqual(TurnSettings.newlyUnguarded(view, TurnSettings.with(MachineSettings(rev: 2), agent: "codex") { $0.permissions = "approve" }), [])
+        XCTAssertEqual(TurnSettings.newlyUnguarded(info.settings, TurnSettings.with(info.settings, agent: "codex") { $0.permissions = "bypass" }), ["codex"])
+        XCTAssertEqual(TurnSettings.newlyUnguarded(info.settings, next), [])
     }
 
     func testGatewayErrorsFromTheProxyAreExplained() {

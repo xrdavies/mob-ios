@@ -22,8 +22,6 @@ struct Health: Codable {
     let features: [String]?
     let runners: [Runner]?
     let runner: String?
-    let models: [String]?
-    let efforts: [String]?
     let checks: [String: Check]?
 
     func supports(_ feature: String) -> Bool { features?.contains(feature) ?? false }
@@ -56,8 +54,7 @@ struct Runner: Codable, Hashable {
     let available: Bool?
     let detail: String?
     let isDefault: Bool?
-    /// What the agent uses when a turn picks none (mobd reads the agent's own settings); nil when
-    /// unset there or from an older mobd.
+    /// The default settings.json names, else the agent's own; nil when neither is set.
     var defaultModel: String? = nil
     var defaultEffort: String? = nil
     var permissions: String? = nil

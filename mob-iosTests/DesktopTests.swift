@@ -3,9 +3,9 @@ import XCTest
 
 final class DesktopTests: XCTestCase {
     func testHealthSessionDesktops() {
-        let h = Health(ok: true, features: ["sessionDesktops"], runners: nil, runner: nil, models: nil, efforts: nil, checks: nil)
+        let h = Health(ok: true, features: ["sessionDesktops"], runners: nil, runner: nil, checks: nil)
         XCTAssertTrue(h.sessionDesktops)
-        let old = Health(ok: true, features: ["stream"], runners: nil, runner: nil, models: nil, efforts: nil, checks: nil)
+        let old = Health(ok: true, features: ["stream"], runners: nil, runner: nil, checks: nil)
         XCTAssertFalse(old.sessionDesktops)
     }
 

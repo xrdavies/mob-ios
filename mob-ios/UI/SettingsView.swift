@@ -51,7 +51,7 @@ struct SettingsView: View {
                     }
                     Button { pairing = PairRequest(machine: nil) } label: { Label("Add machine", systemImage: "plus") }
                 }
-                if let m = app.activeMachine, app.health?.supports("settings") == true {
+                if let m = app.activeMachine, app.health != nil {
                     Section {
                         NavigationLink { AgentSettingsScreen() } label: { Label("Agents on \(m.name)", systemImage: "cpu") }
                     } footer: {

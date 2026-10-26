@@ -22,18 +22,17 @@ struct Composer: View {
         let pickedRunner = chat.currentId != nil ? chat.detail?.session.runner : available.first { $0.name == app.turnPrefs["\(m).runner"] }?.name
         let runner = h?.runner(pickedRunner)
         let runnerKey = "\(m)/\(runner?.name ?? h?.runner ?? "")"
-        let models = runner?.models ?? h?.models ?? []
-        let efforts = runner?.efforts ?? h?.efforts ?? []
+        let models = runner?.models ?? []
+        let efforts = runner?.efforts ?? []
         let canOptions = h?.supports("taskOptions") == true
         // An open chat shows and changes its conversation's model and effort (shared by every
         // device); a new chat keeps a draft on this device until it exists.
-        let hasSettings = h?.supports("settings") == true
-        let shown = TurnSettings.shown(settings: hasSettings, session: chat.currentId != nil ? chat.detail?.session : nil,
+        let shown = TurnSettings.shown(session: chat.currentId != nil ? chat.detail?.session : nil,
                                        draftModel: app.turnPrefs["\(runnerKey).model"], draftEffort: app.turnPrefs["\(runnerKey).effort"])
         let model: String? = shown.model.isEmpty ? nil : shown.model
         let effort: String? = shown.effort.isEmpty ? nil : shown.effort
         let choose = { (key: String, value: String?) in
-            if hasSettings && chat.currentId != nil {
+            if chat.currentId != nil {
                 chat.setTurnSettings(model: key == "model" ? value ?? "" : nil, effort: key == "effort" ? value ?? "" : nil)
             } else {
                 app.setTurnPref("\(runnerKey).\(key)", value)
@@ -105,10 +104,12 @@ struct Composer: View {
                     .accessibilityLabel("Stop")
                 } else {
                     Button {
-                        let sent = TurnSettings.sent(settings: hasSettings, newChat: chat.currentId == nil, shown: shown, efforts: efforts)
-                        send(canSteer: false, busy: false, uploading: uploading, runner: chat.currentId == nil ? runner?.name : nil,
-                             model: canOptions ? sent.model : nil, effort: canOptions ? sent.effort : nil,
-                             clearDraft: hasSettings && chat.currentId == nil ? (m, runnerKey) : nil)
+                        // Only a new chat names them (they become its settings); later turns use the conversation's.
+                        let newChat = chat.currentId == nil
+                        send(canSteer: false, busy: false, uploading: uploading, runner: newChat ? runner?.name : nil,
+                             model: canOptions && newChat ? model : nil,
+                             effort: canOptions && newChat && efforts.contains(shown.effort) ? effort : nil,
+                             clearDraft: newChat ? (m, runnerKey) : nil)
                     } label: {
                         if chat.sending { ProgressView() } else { Image(systemName: "arrow.up").font(.body.weight(.semibold)) }
                     }
