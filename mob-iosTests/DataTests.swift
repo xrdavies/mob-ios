@@ -143,6 +143,10 @@ final class DataTests: XCTestCase {
         """#
         let info = try APIClient.decoder.decode(MachineSettingsInfo.self, from: Data(json.utf8))
         XCTAssertEqual(info.agents["codex"]?.agentDefaultEffort, "xhigh")
+        XCTAssertNil(info.installed, "an mobd answer without the list still decodes")
+        let withList = try APIClient.decoder.decode(MachineSettingsInfo.self, from: Data(json.replacingOccurrences(of: #""agents":{"codex":{"label""#, with: #""installed":[{"name":"pi","label":"Pi","state":"missing","enabled":false,"install":"npm i -g pi"}],"agents":{"codex":{"label""#).utf8))
+        XCTAssertEqual(withList.installed?.first?.stateLabel, "Not installed")
+        XCTAssertEqual(withList.installed?.first?.install, "npm i -g pi")
         let next = TurnSettings.with(info.settings, agent: "codex") { $0.models = ["gpt-6-astra"]; $0.defaultEffort = "high" }
         XCTAssertEqual(next.agents["codex"], AgentSettings(models: ["gpt-6-astra"], defaultEffort: "high", permissions: "approve"))
         XCTAssertEqual(try TurnSettings.add(model: " b ", to: ["a"]).get(), ["a", "b"])

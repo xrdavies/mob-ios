@@ -39,6 +39,31 @@ struct AgentSettingsScreen: View {
                 ForEach(info.agents.keys.sorted(), id: \.self) { name in
                     if let a = edit.agents[name], let agent = info.agents[name] { agentSection(name, agent, a).id(name) }
                 }
+                let others = (info.installed ?? []).filter { $0.state != "ready" }
+                if !others.isEmpty {
+                    Section {
+                        ForEach(others) { a in
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(a.label)
+                                    Spacer()
+                                    Text(a.stateLabel).font(.caption).foregroundStyle(a.state == "error" ? .red : .secondary)
+                                }
+                                if let d = a.detail { Text(d).font(.caption).foregroundStyle(.secondary) }
+                                if let cmd = a.install {
+                                    Button { UIPasteboard.general.string = cmd } label: {
+                                        Label(cmd, systemImage: "doc.on.doc").font(.caption.monospaced()).lineLimit(1)
+                                    }
+                                    .buttonStyle(.borderless)
+                                }
+                            }
+                        }
+                    } header: {
+                        Text("Other agents")
+                    } footer: {
+                        Text("Install on \(machine.name), add the agent to runners in mobd's config.json, then run mobd restart. Tap a command to copy it.")
+                    }
+                }
                 if let message {
                     Section { Text(message.text).foregroundStyle(message.error ? .red : .green) }
                 }

@@ -27,8 +27,24 @@ struct MachineSettingsInfo: Codable, Equatable {
         var agentDefaultModel: String?
         var agentDefaultEffort: String?
     }
+    /// Whether a supported agent is set up on the machine, enabled or not.
+    struct Installed: Codable, Equatable, Identifiable {
+        var name: String
+        var label: String
+        var state: String
+        var enabled: Bool
+        var detail: String?
+        var install: String?
+        var id: String { name }
+
+        /// ready, disabled (installed, not enabled), missing, error.
+        var stateLabel: String {
+            ["disabled": "Installed, not enabled", "missing": "Not installed", "error": "Not working"][state] ?? state
+        }
+    }
     var settings: MachineSettings
     var agents: [String: Agent]
+    var installed: [Installed]?
 }
 
 struct TurnChoice: Equatable {
