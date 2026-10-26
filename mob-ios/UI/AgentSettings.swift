@@ -9,6 +9,8 @@ struct AgentSettingsScreen: View {
     @State private var adding: [String: String] = [:]
     @State private var message: (text: String, error: Bool)?
     @State private var saving = false
+    /// Shown on the button for a moment after a save succeeds.
+    @State private var justSaved = false
     @State private var confirm: [String]?
 
     private func label(_ name: String) -> String { info?.agents[name]?.label ?? name }
@@ -41,7 +43,17 @@ struct AgentSettingsScreen: View {
         .navigationTitle("Agents")
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
-                Button("Save") { save(confirmed: false) }.disabled(edit == nil || edit == info?.settings || saving)
+                // The button itself shows the save: Saving…, then ✓ Saved, then greyed out until a change.
+                Button { save(confirmed: false) } label: {
+                    if saving {
+                        HStack(spacing: 6) { ProgressView(); Text("Saving…") }
+                    } else if justSaved {
+                        Label("Saved", systemImage: "checkmark").foregroundStyle(.green)
+                    } else {
+                        Text("Save")
+                    }
+                }
+                .disabled(edit == nil || edit == info?.settings || saving || justSaved)
             }
         }
         .alert("Run without asking?", isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } })) {
@@ -138,7 +150,12 @@ struct AgentSettingsScreen: View {
                 let saved = try await app.apiClient.saveSettings(edit)
                 self.info = saved
                 self.edit = saved.settings
-                message = ("Saved. New chats use these defaults; open chats keep theirs.", false)
+                message = nil
+                justSaved = true
+                Task {
+                    try? await Task.sleep(for: .seconds(2))
+                    justSaved = false
+                }
                 app.checkHealth()
             } catch let e as APIError where e.code == "settings_changed" {
                 self.edit = nil
