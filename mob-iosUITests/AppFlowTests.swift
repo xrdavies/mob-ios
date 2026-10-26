@@ -80,6 +80,21 @@ final class AppFlowTests: XCTestCase {
         XCTAssertTrue(thumb.waitForExistence(timeout: 15))
         sleep(4) // a snapshot or live frame arrives
         shot("thumbnail")
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            let width = thumb.frame.width
+            XCTAssertGreaterThan(width, app.frame.width * 0.85)
+            let field = app.textFields.firstMatch
+            field.tap()
+            field.typeText(String(repeating: "Unsent draft text for keyboard layout. ", count: 8))
+            XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+            XCTAssertEqual(thumb.frame.width, width, accuracy: 2)
+            let timeline = app.scrollViews["chatTimeline"]
+            if timeline.exists {
+                XCTAssertGreaterThan(timeline.frame.height, 0)
+                XCTAssertTrue(timeline.staticTexts.allElementsBoundByIndex.contains { $0.isHittable }, "history disappeared after keyboard opened")
+            }
+            shot("thumbnail-keyboard")
+        }
         if UIDevice.current.userInterfaceIdiom == .pad {
             // Landscape iPad has room for the desktop beside the chat.
             XCUIDevice.shared.orientation = .landscapeLeft

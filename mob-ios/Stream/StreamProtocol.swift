@@ -98,8 +98,10 @@ enum InputMessage: Equatable {
 
 /// A point in an aspect-fit picture of `video` inside `box`, normalized and clamped to the picture;
 /// `inside` is false over the letterbox bars.
-func normalizePoint(_ p: CGPoint, in box: CGSize, video: CGSize) -> (x: Double, y: Double, inside: Bool)? {
-    guard video.width > 0, video.height > 0, box.width > 0, box.height > 0 else { return nil }
+func normalizePoint(_ p: CGPoint, in box: CGSize, video: CGSize, scale: CGFloat = 1, offset: CGSize = .zero) -> (x: Double, y: Double, inside: Bool)? {
+    guard video.width > 0, video.height > 0, box.width > 0, box.height > 0, scale > 0 else { return nil }
+    let p = CGPoint(x: box.width / 2 + (p.x - box.width / 2 - offset.width) / scale,
+                    y: box.height / 2 + (p.y - box.height / 2 - offset.height) / scale)
     let s = min(box.width / video.width, box.height / video.height)
     let w = video.width * s, h = video.height * s
     let x = Double((p.x - (box.width - w) / 2) / w)

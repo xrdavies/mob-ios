@@ -20,6 +20,8 @@ final class AppState: MachineEvents {
 
     var showDesktopDrawer = false
     var showLiveView = false
+    var chatTabVisible = true
+    var chatCovered = false
     /// Bumped to bring the Chat tab to the front (notification taps).
     private(set) var showChat = 0
     /// Chats waiting for an answer, per machine.
@@ -41,6 +43,7 @@ final class AppState: MachineEvents {
 
     private(set) var apiClient: APIClient
     let chat = ChatStore()
+    let drafts = ChatDrafts()
     let desktops = DesktopStore()
     /// One live view shared by the thumbnail and the full-screen view.
     let stream = StreamSession()
@@ -79,7 +82,9 @@ final class AppState: MachineEvents {
         if changed { saveMachines() }
         chat.onUnauthorized = { [weak self] id in self?.markNeedsPairing(id) }
         chat.onOpen = { [weak self] in self?.followChat() }
-        stream.onUnauthorized = { [weak self] in if let id = self?.activeMachineId { self?.markNeedsPairing(id) } }
+        stream.onUnauthorized = { [weak self] client in
+            self?.noteFailure(APIError(message: "Unauthorized", status: 401), client: client)
+        }
         notifier.onOpen = { [weak self] m, s in self?.openChat(machine: m, session: s) }
         notifier.onAnswer = { [weak self] m, task, question, answer, approved in
             await self?.answerFromNotification(machine: m, task: task, question: question, answer: answer, approved: approved)
@@ -98,6 +103,8 @@ final class AppState: MachineEvents {
 
     /// Points the API client, chats, health and live view at the active machine.
     private func activate() {
+        // Never leave a previous machine's picture or input active while health loads.
+        stream.disconnect()
         let m = activeMachine
         defaults.set(m?.id, forKey: "activeMachine")
         apiClient = m.map(client(for:)) ?? APIClient(baseURL: "", token: nil)
@@ -168,8 +175,8 @@ final class AppState: MachineEvents {
     }
 
     /// For views that call the active machine directly (tasks, snapshots, uploads).
-    func noteFailure(_ error: Error) {
-        if error.isUnauthorized, let id = activeMachineId { markNeedsPairing(id) }
+    func noteFailure(_ error: Error, client: APIClient) {
+        if error.isUnauthorized, client === apiClient, let id = activeMachineId { markNeedsPairing(id) }
     }
 
     func delete(_ m: Machine) {
@@ -316,7 +323,7 @@ final class AppState: MachineEvents {
     }
 
     private func isOpen(_ m: Machine, _ s: Session) -> Bool {
-        foreground && m.id == activeMachineId && chat.currentId == s.id
+        foreground && chatTabVisible && !chatCovered && !showLiveView && m.id == activeMachineId && chat.currentId == s.id
     }
 
     func onSeed(_ m: Machine, _ sessions: [Session]) {

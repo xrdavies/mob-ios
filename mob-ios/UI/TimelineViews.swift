@@ -12,7 +12,9 @@ struct TimelineRow: View {
     var body: some View {
         switch item {
         case .user(_, let m, let task): UserMessage(message: m, task: task)
-        case .assistant(_, let m): AssistantMessage(message: m, runner: runner)
+        case .assistant(_, let m):
+            let task = app.chat.detail?.tasks.first { $0.id == m.taskId }
+            AssistantMessage(message: m, runner: task?.runner ?? runner, model: task?.modelLabel ?? "Model not reported")
         case .steps(_, let acts): VStack(alignment: .leading, spacing: 0) { ForEach(acts) { ActivityRow(a: $0) } }.padding(.leading, 34)
         case .group(_, let acts): ActivityGroup(activities: acts).padding(.leading, 34)
         case .ask(_, let q): QuestionCard(q: q).padding(.leading, 34)
@@ -35,17 +37,20 @@ private struct WorkingRow: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { _ in
             let time = duration(task.startedAt, nil)
-            HStack(spacing: 8) {
-                if app.chat.cancelling {
-                    Circle().fill(.red).frame(width: 8, height: 8)
-                    Text("Stopping…").foregroundStyle(.red)
-                } else if waiting {
-                    Circle().fill(Color.waiting).frame(width: 8, height: 8)
-                    Text("Waiting for your answer").foregroundStyle(Color.waiting)
-                } else {
-                    ProgressView().controlSize(.mini)
-                    Text((["Working", time] + [latest?.title].compactMap { $0 }).filter { !$0.isEmpty }.joined(separator: " · "))
-                        .foregroundStyle(Color.accentColor)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(task.modelLabel).foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    if app.chat.cancelling {
+                        Circle().fill(.red).frame(width: 8, height: 8)
+                        Text("Stopping…").foregroundStyle(.red)
+                    } else if waiting {
+                        Circle().fill(Color.waiting).frame(width: 8, height: 8)
+                        Text("Waiting for your answer").foregroundStyle(Color.waiting)
+                    } else {
+                        ProgressView().controlSize(.mini)
+                        Text((["Working", time] + [latest?.title].compactMap { $0 }).filter { !$0.isEmpty }.joined(separator: " · "))
+                            .foregroundStyle(Color.accentColor)
+                    }
                 }
             }
             .font(.caption).lineLimit(1)
@@ -85,6 +90,7 @@ private struct UserMessage: View {
 private struct AssistantMessage: View {
     let message: Message
     let runner: String?
+    let model: String
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -102,6 +108,7 @@ private struct AssistantMessage: View {
                     .buttonStyle(.borderless).foregroundStyle(.secondary)
                     .accessibilityLabel("Copy reply")
                 }
+                Text(model).font(.caption2).foregroundStyle(.secondary)
                 MarkdownView(text: message.content)
             }
         }
@@ -273,7 +280,7 @@ private struct TurnFooter: View {
             task.startedAt == nil ? nil : duration(task.startedAt, task.finishedAt),
             total > 0 ? "\(compactNumber(total)) tokens" : nil,
             u?.costUsd.flatMap { $0 > 0 ? String(format: $0 < 0.01 ? "$%.4f" : "$%.2f", $0) : nil },
-            task.model,
+            task.modelLabel,
             task.effort.map { "effort \($0)" },
         ].compactMap { $0 }
         VStack(alignment: .leading, spacing: 6) {
@@ -289,6 +296,7 @@ private struct TurnFooter: View {
                             app.chat.send(task.prompt ?? "", model: task.model, effort: task.effort, attachments: task.attachments ?? [])
                         } label: { Label("Retry", systemImage: "arrow.clockwise") }
                         .buttonStyle(.bordered).controlSize(.small)
+                        .disabled(app.chat.sending || app.chat.detail?.busy == true || !app.isConnected)
                     }
                 }
                 .padding(10)
@@ -336,7 +344,7 @@ struct QuestionCard: View {
 
     private func answer(_ answer: String?, _ approved: Bool?) {
         sending = true
-        app.chat.answer(q, answer: answer, approved: approved)
+        app.chat.answer(q, answer: answer, approved: approved) { if !$0 { sending = false } }
     }
 
     private var pending: some View {

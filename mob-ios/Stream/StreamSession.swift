@@ -37,7 +37,7 @@ final class StreamSession {
 
     /// Frames drawn since connecting (for checks; not observed).
     @ObservationIgnored private(set) var frames = 0
-    @ObservationIgnored var onUnauthorized: (() -> Void)?
+    @ObservationIgnored var onUnauthorized: ((APIClient) -> Void)?
     /// Called once per session when a transport wins, so the machine can remember the WebSocket.
     @ObservationIgnored var onTransport: ((LiveTransport) -> Void)?
     /// Tests only: drop ICE candidates both ways, like a network without UDP.
@@ -106,6 +106,7 @@ final class StreamSession {
     }
 
     private func run(_ a: Int, client: APIClient, maxWidth: Int, maxHeight: Int, quality: LiveQuality, preferWebSocket: Bool) async {
+        guard attempt == a else { return }
         let config = RTCConfiguration()
         config.sdpSemantics = .unifiedPlan // host candidates only: LAN and Tailscale
         let bridge = Bridge(owner: self, attempt: a)
@@ -165,7 +166,8 @@ final class StreamSession {
                 pc.setRemoteDescription(RTCSessionDescription(type: .answer, sdp: sdp)) { err in if let err { k.resume(throwing: err) } else { k.resume() } }
             }
         } catch {
-            if error.isUnauthorized { onUnauthorized?() }
+            guard attempt == a else { return }
+            if error.isUnauthorized { onUnauthorized?(client) }
             if let msg = streamErrorText(error) { return fail(a, msg) }
             let status = (error as? APIError)?.status
             fail(a, status == 404 || status == 405 ? "Update mobd on the office Mac to use the live desktop" : readable(error))

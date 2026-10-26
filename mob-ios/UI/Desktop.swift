@@ -1,17 +1,6 @@
 import SwiftUI
 import UIKit
 
-/// Maps a point in the view (screen space, before zoom) to desktop pixels.
-func toDesktop(_ p: CGPoint, size: CGSize, fw: Int, fh: Int, scale: CGFloat, offset: CGSize) -> (x: Int, y: Int) {
-    let cx = size.width / 2, cy = size.height / 2
-    let lx = cx + (p.x - cx - offset.width) / scale
-    let ly = cy + (p.y - cy - offset.height) / scale
-    let s = min(size.width / CGFloat(fw), size.height / CGFloat(fh))
-    let x = Int(((lx - (size.width - CGFloat(fw) * s) / 2) / s).rounded())
-    let y = Int(((ly - (size.height - CGFloat(fh) * s) / 2) / s).rounded())
-    return (min(max(x, 0), fw - 1), min(max(y, 0), fh - 1))
-}
-
 /// Keeps the shared live view open while the calling view is on screen.
 private struct RetainDesktop: ViewModifier {
     @Environment(AppState.self) private var app
@@ -26,14 +15,13 @@ private struct RetainDesktop: ViewModifier {
 /// Always view-only: tapping it opens the full-screen live view.
 struct DesktopThumbnail: View {
     @Environment(AppState.self) private var app
-    var maxHeight: CGFloat = 240
+    let width: CGFloat
 
     var body: some View {
         let s = app.liveState
         let aspect = s.width > 0 && s.height > 0 ? CGFloat(s.width) / CGFloat(s.height) : 16 / 10
         DesktopCanvas()
-            .aspectRatio(aspect, contentMode: .fit)
-            .frame(maxHeight: maxHeight)
+            .frame(width: max(width - 24, 1), height: max(width - 24, 1) / aspect)
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .overlay(alignment: .topLeading) { StatusChip().padding(8) }
             .overlay(alignment: .topTrailing) {
@@ -48,6 +36,7 @@ struct DesktopThumbnail: View {
             .accessibilityLabel("Office desktop. Opens full screen.")
             .padding(.horizontal, 12).padding(.vertical, 8)
             .modifier(RetainDesktop())
+            .id(ObjectIdentifier(app.apiClient))
     }
 }
 
@@ -98,23 +87,26 @@ private struct DesktopCanvas: View {
             let pixels = devicePixels(width, scale: displayScale)
             let sessionId = app.health?.sessionDesktops == true ? app.chat.currentId : nil
             guard !live, width > 0, app.activeMachine?.needsPairing != true else { return }
+            let client = app.apiClient
             // Another conversation: clear its snapshot.
             if sessionId != snapshotFor { snapshot = nil; snapshotTag = nil; asleep = false; noDesktop = false; snapshotFor = sessionId }
             while !Task.isCancelled {
                 do {
                     // A size change starts a new task and a new download; otherwise unchanged costs a 304.
-                    let fresh = try await app.apiClient.screen(maxWidth: pixels, etag: snapshot == nil ? nil : snapshotTag, sessionId: sessionId)
+                    let fresh = try await client.screen(maxWidth: pixels, etag: snapshot == nil ? nil : snapshotTag, sessionId: sessionId)
+                    guard !Task.isCancelled, client === app.apiClient else { return }
                     if let image = fresh.image { snapshot = image; snapshotTag = fresh.etag }
                     asleep = fresh.asleep
                     noDesktop = false
                     snapshotAt = Date()
                     snapshotError = nil
                 } catch {
+                    guard !Task.isCancelled, client === app.apiClient else { return }
                     if !(error is CancellationError) {
                         if (error as? APIError)?.code == "no_desktop" { noDesktop = true; snapshotError = nil }
                         else { snapshotError = readable(error) }
                     }
-                    if error.isUnauthorized { return app.noteFailure(error) }
+                    if error.isUnauthorized { return app.noteFailure(error, client: client) }
                 }
                 try? await Task.sleep(for: .seconds(2))
             }
@@ -124,7 +116,7 @@ private struct DesktopCanvas: View {
     private var taskId: String {
         let live = app.stream.state.status == .connected
         let s = app.health?.sessionDesktops == true ? app.chat.currentId ?? "none" : "shared"
-        return "\(live) \(app.activeMachine?.needsPairing == true) \(devicePixels(width, scale: displayScale)) \(s)"
+        return "\(ObjectIdentifier(app.apiClient)) \(live) \(app.activeMachine?.needsPairing == true) \(devicePixels(width, scale: displayScale)) \(s)"
     }
 
     /// "Snapshot · 17:33:05", or mobd's reason snapshots fail (locked, asleep, no Screen Recording).
@@ -284,6 +276,7 @@ struct LiveView: View {
             GeometryReader { geo in
                 ZStack {
                     DesktopCanvas()
+                        .id(ObjectIdentifier(app.apiClient))
                         .scaleEffect(scale)
                         .offset(offset)
                     if s.control, let mark { marker(mark, in: geo.size, fw: s.width, fh: s.height) }
@@ -337,24 +330,26 @@ struct LiveView: View {
 
     private func handler(size: CGSize, fw: Int, fh: Int) -> TouchHandler {
         let stream = app.stream
-        func remote(_ p: CGPoint) -> (x: Int, y: Int) { toDesktop(p, size: size, fw: max(fw, 1), fh: max(fh, 1), scale: scale, offset: offset) }
-        func norm(_ p: CGPoint) -> (x: Double, y: Double)? {
-            guard let n = normalizePoint(p, in: size, video: CGSize(width: fw, height: fh)) else { return nil }
-            return (n.x, n.y)
+        func norm(_ p: CGPoint) -> (x: Double, y: Double, inside: Bool)? {
+            normalizePoint(p, in: size, video: CGSize(width: fw, height: fh), scale: scale, offset: offset)
+        }
+        func point(_ n: (x: Double, y: Double, inside: Bool)) -> (x: Int, y: Int) {
+            (min(Int((n.x * Double(fw)).rounded()), fw - 1), min(Int((n.y * Double(fh)).rounded()), fh - 1))
         }
         return TouchHandler(
             click: { p, right in
-                guard let n = norm(p) else { return }
+                guard let n = norm(p), n.inside else { return }
                 stream.click(n.x, n.y, right: right)
-                mark = remote(p)
+                mark = point(n)
             },
             drag: { p, phase in
                 guard let n = norm(p) else { return }
+                if phase == .began && !n.inside { return }
                 stream.drag(n.x, n.y, phase)
-                mark = remote(p)
+                mark = point(n)
             },
             scroll: { p, dx, dy in
-                guard let n = norm(p) else { return }
+                guard let n = norm(p), n.inside else { return }
                 stream.scroll(n.x, n.y, dx: Double(dx), dy: Double(dy))
             },
             zoom: { factor, pan in

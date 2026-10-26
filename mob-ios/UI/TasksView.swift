@@ -46,12 +46,16 @@ struct TasksView: View {
 
     private func load() async {
         guard let m = app.activeMachine, !m.needsPairing else { return }
+        let client = app.apiClient
         do {
-            tasks = try await app.apiClient.tasks().sorted { ($0.createdAt ?? "") > ($1.createdAt ?? "") }
+            let loaded = try await client.tasks()
+            guard !Task.isCancelled, client === app.apiClient else { return }
+            tasks = loaded.sorted { ($0.createdAt ?? "") > ($1.createdAt ?? "") }
             error = nil
         } catch {
+            guard !Task.isCancelled, client === app.apiClient else { return }
             if !(error is CancellationError) { self.error = readable(error) }
-            app.noteFailure(error)
+            app.noteFailure(error, client: client)
         }
     }
 

@@ -68,6 +68,7 @@ final class ChatStore {
     @ObservationIgnored private var api: APIClient?
     @ObservationIgnored private var machineId = ""
     @ObservationIgnored private var generation = 0
+    @ObservationIgnored private var selection = 0
     @ObservationIgnored private var poll: Task<Void, Never>?
     @ObservationIgnored private var listPoll: Task<Void, Never>?
     @ObservationIgnored private var stream: Task<Void, Never>?
@@ -80,6 +81,7 @@ final class ChatStore {
 
     func attach(_ client: APIClient?, machine: String) {
         generation += 1
+        selection += 1
         poll?.cancel()
         listPoll?.cancel()
         stopStream()
@@ -91,6 +93,11 @@ final class ChatStore {
         detail = nil
         currentId = nil
         cache = []
+        outbox = nil
+        sending = false
+        loading = false
+        cancelling = false
+        error = nil
         guard client != nil else { return }
         let gen = generation
         listPoll = Task { [weak self] in
@@ -150,6 +157,7 @@ final class ChatStore {
     /// Opens a conversation; nil starts a new chat.
     func open(_ id: String?) {
         let changed = id != currentId
+        if changed { selection += 1 }
         currentId = id
         defer { if changed { onOpen?() } }
         detail = cache.last { $0.session.id == id }
@@ -157,7 +165,7 @@ final class ChatStore {
         UserDefaults.standard.set(id, forKey: key)
         poll?.cancel()
         stopStream()
-        guard let id else { return }
+        guard let id else { loading = false; return }
         loading = detail == nil
         follow(id)
     }
@@ -249,6 +257,8 @@ final class ChatStore {
         guard var d = detail, var t = d.current, t.id == taskId, ev.id > (t.eventId ?? 0) else { return }
         t.eventId = ev.id
         switch type {
+        case "resume":
+            if let model = ev.model, !model.isEmpty { t.model = model }
         case "activity":
             if let a = ev.activity { d.activities.upsert(a) }
         case "question":
@@ -331,29 +341,32 @@ final class ChatStore {
 
     // MARK: - Actions
 
-    /// Starts a turn. The message shows in the chat right away (see `outbox`); `done` gets false
-    /// if mobd did not accept it, so the composer can give the text back.
+    /// Shows the message at once; the composer keeps its draft until `done` confirms acceptance.
     func send(_ prompt: String, runner: String? = nil, model: String? = nil, effort: String? = nil,
               attachments: [String] = [], done: @escaping (Bool) -> Void = { _ in }) {
-        guard api != nil else { return done(false) }
+        guard api != nil, !sending else { return done(false) }
         sending = true
         let sessionId = currentId
         let gen = generation
+        let selected = selection
         outbox = Outgoing(text: prompt, sessionId: sessionId)
         run { client in
             var ok = false
             defer {
-                self.sending = false
-                if !ok { self.outbox = nil }
+                if gen == self.generation {
+                    self.sending = false
+                    if !ok { self.outbox = nil }
+                }
                 done(ok)
             }
             let task = try await client.createTask(prompt: prompt, sessionId: sessionId, runner: runner, model: model, effort: effort, attachments: attachments)
             ok = true
+            guard gen == self.generation else { return }
             self.outbox?.taskId = task.id
             self.outbox?.sessionId = task.sessionId
-            guard gen == self.generation else { return }
-            if task.sessionId == self.currentId { self.reload() } else { self.open(task.sessionId) }
-            await self.loadSessions()
+            if task.sessionId == self.currentId { self.reload() }
+            else if sessionId == nil, selected == self.selection { self.open(task.sessionId) }
+            self.refreshSessions()
         }
     }
 
@@ -365,36 +378,44 @@ final class ChatStore {
 
     func cancel() {
         guard let task = detail?.current, Status.busy(task.status) else { return }
+        let gen = generation
         cancelling = true
         run { client in
             do { try await client.cancel(task.id) } catch {
-                self.cancelling = false
+                if gen == self.generation, self.currentId == task.sessionId { self.cancelling = false }
                 throw error
             }
-            self.reload()
+            if gen == self.generation, self.currentId == task.sessionId { self.reload() }
         }
     }
 
     /// Adds a message to the running turn (runners with steer).
     func steer(_ prompt: String, done: @escaping (Bool) -> Void = { _ in }) {
-        guard let task = detail?.current else { return }
+        guard api != nil, !sending, let task = detail?.current else { return done(false) }
+        let gen = generation
         sending = true
         run { client in
             var ok = false
             defer {
-                self.sending = false
+                if gen == self.generation { self.sending = false }
                 done(ok)
             }
             try await client.steer(task.id, prompt: prompt)
             ok = true
-            self.reload()
+            if gen == self.generation, self.currentId == task.sessionId { self.reload() }
         }
     }
 
-    func answer(_ q: Question, answer: String?, approved: Bool?) {
+    func answer(_ q: Question, answer: String?, approved: Bool?, done: @escaping (Bool) -> Void) {
+        guard api != nil else { done(false); return }
+        let gen = generation
+        let sessionId = currentId
         run { client in
+            var ok = false
+            defer { done(ok) }
             try await client.answer(q, answer: answer, approved: approved)
-            self.reload()
+            ok = true
+            if gen == self.generation, self.currentId == sessionId { self.reload() }
         }
     }
 
@@ -407,16 +428,20 @@ final class ChatStore {
     }
 
     private func patch(_ s: Session, _ call: @escaping (APIClient) async throws -> Void) {
+        let gen = generation
         run { client in
             try await call(client)
+            guard gen == self.generation else { return }
             await self.loadSessions()
             if s.id == self.currentId { self.reload() }
         }
     }
 
     func delete(_ s: Session) {
+        let gen = generation
         run { client in
             try await client.deleteSession(s.id)
+            guard gen == self.generation else { return }
             self.remove(s.id)
             await self.loadSessions()
         }

@@ -42,11 +42,10 @@ struct ChatView: View {
                 // Wide screens show the desktop in a column beside the chat, like the desktop app.
                 let side = geo.size.width >= 720
                 HStack(spacing: 0) {
-                    chatColumn(items, lastFooter: lastFooter, thumbnailOnTop: !side)
+                    chatColumn(items, lastFooter: lastFooter, thumbnailOnTop: !side, width: min(geo.size.width, 840))
                     if side, app.showDesktopDrawer, app.activeMachine != nil {
                         Divider()
-                        DesktopThumbnail(maxHeight: .infinity)
-                            .fixedSize(horizontal: false, vertical: true) // height from the aspect ratio, pinned to the top
+                        DesktopThumbnail(width: min(geo.size.width * 0.4, 520))
                             .frame(width: min(geo.size.width * 0.4, 520))
                             .frame(maxHeight: .infinity, alignment: .top)
                             .transition(.move(edge: .trailing).combined(with: .opacity))
@@ -88,6 +87,7 @@ struct ChatView: View {
             }
             .sheet(isPresented: $showChats) { SessionList(openSettings: openSettings) }
             .sheet(item: $pairing) { PairingSheet(existing: $0.machine) }
+            .onChange(of: showChats || pairing != nil, initial: true) { app.chatCovered = showChats || pairing != nil }
             .fullScreenCover(isPresented: $app.showLiveView) { LiveView() }
             .alert("Something went wrong", isPresented: Binding(get: { chat.error != nil }, set: { if !$0 { chat.error = nil } })) {
                 Button("OK", role: .cancel) {}
@@ -98,11 +98,11 @@ struct ChatView: View {
     }
 
     /// Timeline and composer, kept to a readable width on wide screens.
-    private func chatColumn(_ items: [TimelineItem], lastFooter: String?, thumbnailOnTop: Bool) -> some View {
+    private func chatColumn(_ items: [TimelineItem], lastFooter: String?, thumbnailOnTop: Bool, width: CGFloat) -> some View {
         VStack(spacing: 0) {
             if let banner = app.desktops.visibleBanner { ResourceBannerView(banner: banner) }
             if thumbnailOnTop, app.showDesktopDrawer, app.activeMachine != nil {
-                DesktopThumbnail()
+                DesktopThumbnail(width: width)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
             content(items, lastFooter: lastFooter)
@@ -110,7 +110,11 @@ struct ChatView: View {
         .frame(maxWidth: 840)
         .frame(maxWidth: .infinity)
         .safeAreaInset(edge: .bottom) {
-            if app.activeMachine != nil { Composer().frame(maxWidth: 840) }
+            if let machine = app.activeMachineId {
+                Composer(draft: app.drafts.draft(machine: machine, session: chat.currentId))
+                    .id("\(machine)/\(chat.currentId ?? "")")
+                    .frame(maxWidth: 840)
+            }
         }
     }
 
@@ -148,7 +152,8 @@ struct ChatView: View {
         } else if chat.detail == nil && chat.loading && outgoing == nil {
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            timeline(items, lastFooter: lastFooter)
+            ChatTimeline(items: items, lastFooter: lastFooter, outgoing: outgoing)
+                .id("\(app.activeMachineId ?? "")/\(chat.currentId ?? "")")
         }
     }
 
@@ -162,7 +167,16 @@ struct ChatView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func timeline(_ items: [TimelineItem], lastFooter: String?) -> some View {
+}
+
+private struct ChatTimeline: View {
+    @Environment(AppState.self) private var app
+    let items: [TimelineItem]
+    let lastFooter: String?
+    let outgoing: Outgoing?
+    @State private var atBottom = true
+
+    var body: some View {
         let pendingQuestion = items.last {
             if case .ask(_, let q) = $0 { return q.isPending } else { return false }
         }?.id
@@ -170,20 +184,39 @@ struct ChatView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
                     ForEach(items) { item in
-                        TimelineRow(item: item, runner: chat.detail?.session.runner, last: item.id == lastFooter).id(item.id)
+                        TimelineRow(item: item, runner: app.chat.detail?.session.runner, last: item.id == lastFooter).id(item.id)
                     }
                     if let o = outgoing { OutgoingMessage(text: o.text).id("outbox") }
                     Color.clear.frame(height: 1).id("bottom")
                 }
                 .padding(16)
             }
-            .defaultScrollAnchor(.bottom)
+            .modifier(ChatScrollPosition(atBottom: $atBottom))
+            .accessibilityIdentifier("chatTimeline")
             .scrollDismissesKeyboard(.interactively)
-            // Follow new output; a new question always comes into view.
-            .onChange(of: items.last?.id) { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
-            .onChange(of: outgoing) { if outgoing != nil { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } } }
-            .onChange(of: pendingQuestion) { if pendingQuestion != nil { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } } }
-            .onChange(of: chat.currentId) { proxy.scrollTo("bottom", anchor: .bottom) }
+            // The working row keeps its ID as replies grow; follow content only while at the bottom.
+            .onChange(of: items) { if atBottom { proxy.scrollTo("bottom", anchor: .bottom) } }
+            .onChange(of: outgoing) { if outgoing != nil { proxy.scrollTo("bottom", anchor: .bottom) } }
+            .onChange(of: pendingQuestion) { if let pendingQuestion { proxy.scrollTo(pendingQuestion, anchor: .bottom) } }
+        }
+    }
+}
+
+private struct ChatScrollPosition: ViewModifier {
+    @Binding var atBottom: Bool
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content
+                .defaultScrollAnchor(.bottom, for: .initialOffset)
+                .defaultScrollAnchor(.top, for: .alignment)
+                .defaultScrollAnchor(atBottom ? .bottom : .top, for: .sizeChanges)
+                .onScrollGeometryChange(for: Bool.self) { geometry in
+                    geometry.contentSize.height + geometry.contentInsets.bottom - geometry.visibleRect.maxY < 60
+                } action: { _, bottom in atBottom = bottom }
+        } else {
+            // shortcut: iOS 17 has no scroll geometry callback; remove this fallback when targeting iOS 18.
+            content.defaultScrollAnchor(.bottom)
         }
     }
 }
@@ -278,14 +311,14 @@ struct SessionList: View {
             Button("Cancel", role: .cancel) {}
         }
         .confirmationDialog(
-            Text("Delete \"\\(deleting?.displayTitle ?? \"\")\"?"),
+            Text("Delete \"\(deleting?.displayTitle ?? "")\"?"),
             isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
             titleVisibility: .visible
         ) {
             Button("Delete", role: .destructive) { if let s = deleting { chat.delete(s) } }
         } message: {
             let extra = app.desktops.mark(deleting?.id ?? "") != nil ? " Its desktop closes; open windows are lost." : ""
-            Text("The chat and its screenshots are removed from the office Mac. This cannot be undone.\\(extra)")
+            Text("The chat and its screenshots are removed from the office Mac. This cannot be undone.\(extra)")
         }
         .confirmationDialog(
             Text("Close desktop?"),
@@ -299,7 +332,7 @@ struct SessionList: View {
             Text("The running turn will be stopped and open windows closed. Files and browser logins are kept.")
         }
         .confirmationDialog(
-            Text("Archive \"\\(confirmArchive?.displayTitle ?? \"\")\"?"),
+            Text("Archive \"\(confirmArchive?.displayTitle ?? "")\"?"),
             isPresented: Binding(get: { confirmArchive != nil }, set: { if !$0 { confirmArchive = nil } }),
             titleVisibility: .visible
         ) {

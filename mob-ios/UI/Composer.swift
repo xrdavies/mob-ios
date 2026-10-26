@@ -3,23 +3,13 @@ import SwiftUI
 
 private let maxAttachments = 10
 
-/// An image picked for the next turn: uploading, uploaded (id) or failed.
-@MainActor @Observable
-private final class Attachment: Identifiable {
-    let id = UUID()
-    var preview: UIImage?
-    var uploadId: String?
-    var error: String?
-}
-
 /// Prompt box with images, agent / model / effort, Stop, and adding to a running turn.
 /// Like the desktop app: one turn at a time per chat; while a turn runs you can draft the next
 /// message, or send it into the turn when the agent supports steering.
 struct Composer: View {
     @Environment(AppState.self) private var app
-    @State private var text = ""
+    @Bindable var draft: ChatDraft
     @State private var picked: [PhotosPickerItem] = []
-    @State private var attachments: [Attachment] = []
     @FocusState private var focused: Bool
 
     private var chat: ChatStore { app.chat }
@@ -41,25 +31,35 @@ struct Composer: View {
         let task = chat.detail?.current
         let busy = chat.detail?.busy == true
         let canSteer = task?.status == Status.running && runner?.steer == true && h?.supports("steer") == true && !chat.cancelling
-        let uploading = attachments.contains { $0.uploadId == nil && $0.error == nil }
+        let text = draft.text
+        let attachments = draft.attachments
+        let uploading = !draft.attachmentsReady
 
         VStack(alignment: .leading, spacing: 8) {
+            if let task {
+                Text("Current turn · \(task.modelLabel)")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             if !attachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) { ForEach(attachments) { chip($0) } }
                 }
             }
-            TextField(placeholder(canSteer: canSteer, busy: busy), text: $text, axis: .vertical)
+            if attachments.contains(where: { $0.error != nil }) {
+                Text("An image could not be uploaded. Remove it and attach it again before sending.")
+                    .font(.caption).foregroundStyle(.red)
+            }
+            TextField(placeholder(canSteer: canSteer, busy: busy), text: $draft.text, axis: .vertical)
                 .lineLimit(1...6)
                 .focused($focused)
                 .padding(10)
                 .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
-                .disabled(!app.isConnected)
+                .disabled(!app.isConnected || draft.sending)
             HStack(spacing: 6) {
                 PhotosPicker(selection: $picked, maxSelectionCount: maxAttachments - attachments.count, matching: .images) {
                     Image(systemName: "photo.badge.plus")
                 }
-                .disabled(!app.isConnected || !canUpload || attachments.count >= maxAttachments)
+                .disabled(!app.isConnected || !canUpload || draft.sending || attachments.count >= maxAttachments)
                 .accessibilityLabel("Attach images")
 
                 if chat.currentId == nil && available.count > 1 {
@@ -68,7 +68,7 @@ struct Composer: View {
                     Text(runner.title).font(.caption).foregroundStyle(.secondary)
                 }
                 if canOptions && !models.isEmpty {
-                    option("memorychip", model ?? "Model", "Default model", models.map { ($0, $0) }, model) { app.setTurnPref("\(runnerKey).model", $0) }
+                    option("memorychip", model ?? "Default model", "Default model", models.map { ($0, $0) }, model) { app.setTurnPref("\(runnerKey).model", $0) }
                 }
                 if canOptions && !efforts.isEmpty {
                     option("brain", effort ?? "Effort", "Default effort", efforts.map { ($0, $0) }, effort) { app.setTurnPref("\(runnerKey).effort", $0) }
@@ -80,7 +80,7 @@ struct Composer: View {
                             Image(systemName: "arrow.up").font(.body.weight(.semibold))
                         }
                         .buttonStyle(.bordered).clipShape(Circle())
-                        .disabled(chat.sending)
+                        .disabled(!app.isConnected || chat.sending || draft.sending || !attachments.isEmpty)
                         .accessibilityLabel("Send to running turn")
                     }
                     Button { chat.cancel() } label: {
@@ -97,7 +97,7 @@ struct Composer: View {
                         if chat.sending { ProgressView() } else { Image(systemName: "arrow.up").font(.body.weight(.semibold)) }
                     }
                     .buttonStyle(.borderedProminent).clipShape(Circle())
-                    .disabled(!app.isConnected || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || chat.sending || uploading)
+                    .disabled(!app.isConnected || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || chat.sending || draft.sending || uploading)
                     .accessibilityLabel("Send")
                 }
             }
@@ -114,22 +114,20 @@ struct Composer: View {
     }
 
     private func send(canSteer: Bool, busy: Bool, uploading: Bool, runner: String?, model: String?, effort: String?) {
-        let prompt = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !prompt.isEmpty else { return }
+        let draft = draft
+        let prompt = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty, !draft.sending, !chat.sending else { return }
         if canSteer {
-            chat.steer(prompt) { ok in if ok && text.trimmingCharacters(in: .whitespacesAndNewlines) == prompt { text = "" } }
+            guard draft.attachments.isEmpty else { return }
+            draft.beginSending()
+            chat.steer(prompt) { draft.finishSending($0) }
             return
         }
-        guard !busy, !uploading, !chat.sending else { return }
-        // Clear at once: the message shows in the chat while it is sent.
-        let sent = attachments
-        text = ""
-        attachments = []
-        chat.send(prompt, runner: runner, model: model, effort: effort, attachments: sent.compactMap(\.uploadId)) { ok in
-            // Not sent: give the text back, unless something new was typed meanwhile.
-            guard !ok, text.isEmpty else { return }
-            text = prompt
-            attachments = sent
+        guard !busy, !uploading, draft.attachmentsReady else { return }
+        // Keep the draft until accepted, so a failed request never loses text or images.
+        draft.beginSending()
+        chat.send(prompt, runner: runner, model: model, effort: effort, attachments: draft.attachments.compactMap(\.uploadId)) {
+            draft.finishSending($0)
         }
     }
 
@@ -137,10 +135,12 @@ struct Composer: View {
     private func load(_ items: [PhotosPickerItem]) {
         guard !items.isEmpty else { return }
         picked = []
+        let draft = draft
+        guard !draft.sending else { return }
         let client = app.apiClient
-        for (i, item) in items.prefix(maxAttachments - attachments.count).enumerated() {
-            let a = Attachment()
-            attachments.append(a)
+        for (i, item) in items.prefix(maxAttachments - draft.attachments.count).enumerated() {
+            let a = DraftAttachment()
+            draft.attachments.append(a)
             Task {
                 do {
                     guard let data = try await item.loadTransferable(type: Data.self), let image = UIImage(data: data) else {
@@ -152,13 +152,13 @@ struct Composer: View {
                 } catch {
                     a.error = readable(error)
                     Log.error("upload failed: \(readable(error))")
-                    app.noteFailure(error)
+                    app.noteFailure(error, client: client)
                 }
             }
         }
     }
 
-    private func chip(_ a: Attachment) -> some View {
+    private func chip(_ a: DraftAttachment) -> some View {
         ZStack(alignment: .topTrailing) {
             ZStack {
                 Color(.secondarySystemBackground)
@@ -169,11 +169,12 @@ struct Composer: View {
             .frame(width: 64, height: 64)
             .clipShape(RoundedRectangle(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10).stroke(a.error != nil ? Color.red : .clear))
-            Button { attachments.removeAll { $0.id == a.id } } label: {
+            Button { draft.attachments.removeAll { $0.id == a.id } } label: {
                 Image(systemName: "xmark.circle.fill").symbolRenderingMode(.palette).foregroundStyle(.white, .black.opacity(0.6))
             }
             .offset(x: 4, y: -4)
             .accessibilityLabel("Remove image")
+            .disabled(draft.sending)
         }
         .padding(.top, 4)
     }

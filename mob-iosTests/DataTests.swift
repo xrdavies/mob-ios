@@ -2,6 +2,21 @@ import XCTest
 @testable import mob_ios
 
 final class DataTests: XCTestCase {
+    func testReportedModelEventDecodesWithOldServerCompatibility() throws {
+        let reported = try APIClient.decoder.decode(TaskEvent.self, from: Data(#"{"id":2,"type":"resume","model":"actual-model"}"#.utf8))
+        XCTAssertEqual(reported.model, "actual-model")
+        let old = try APIClient.decoder.decode(TaskEvent.self, from: Data(#"{"id":2,"type":"resume"}"#.utf8))
+        XCTAssertNil(old.model)
+    }
+    func testModelLabelNeverMistakesTheRunnerForTheModel() {
+        var task = AgentTask(id: "t", sessionId: "s", runner: "codex", status: "running")
+        XCTAssertEqual(task.modelLabel, "Default model (not reported)")
+        task.model = "selected-model"
+        XCTAssertEqual(task.modelLabel, "selected-model")
+        task.model = "  "
+        XCTAssertEqual(task.modelLabel, "Default model (not reported)")
+    }
+
     private func task(_ id: String, _ status: String) -> AgentTask {
         AgentTask(id: id, sessionId: "s", runner: "codex", prompt: "prompt \(id)", status: status, createdAt: "2026-10-14T00:00:00Z")
     }

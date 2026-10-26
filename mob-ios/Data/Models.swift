@@ -106,6 +106,11 @@ struct AgentTask: Codable, Identifiable, Hashable {
     var queueReason: String?
     /// True while the turn waits for the user to answer a question.
     var waiting: Bool?
+
+    var modelLabel: String {
+        guard let model, !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return "Default model (not reported)" }
+        return model
+    }
 }
 
 struct Session: Codable, Identifiable, Hashable {
@@ -309,6 +314,7 @@ struct TaskEvent: Codable {
     let activity: Activity?
     let question: Question?
     let usage: Usage?
+    var model: String? = nil
     let timestamp: String?
 }
 

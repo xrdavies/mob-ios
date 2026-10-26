@@ -68,5 +68,6 @@ struct RootView: View {
                 .tag(2)
         }
         .onChange(of: app.showChat) { tab = 0 }
+        .onChange(of: tab, initial: true) { app.chatTabVisible = tab == 0 }
     }
 }

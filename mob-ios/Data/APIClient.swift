@@ -40,10 +40,10 @@ final class APIClient {
 
     static let decoder = JSONDecoder()
 
-    init(baseURL: String, token: String?) {
+    init(baseURL: String, token: String?, configuration: URLSessionConfiguration = .default) {
         self.baseURL = APIClient.normalize(baseURL)
         self.token = token
-        let config = URLSessionConfiguration.default
+        let config = configuration
         // Remote routes (Tailscale Funnel's relays) can take seconds per request.
         config.timeoutIntervalForRequest = 20
         config.waitsForConnectivity = false

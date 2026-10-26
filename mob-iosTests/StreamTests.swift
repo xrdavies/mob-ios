@@ -85,6 +85,17 @@ final class StreamTests: XCTestCase {
         XCTAssertEqual(c.y, 0.0) // clamped
     }
 
+    func testZoomedAndPannedInputMatchesTheVisibleDesktop() {
+        let box = CGSize(width: 400, height: 250)
+        let video = CGSize(width: 1600, height: 1000)
+        let zoomed = normalizePoint(CGPoint(x: 300, y: 125), in: box, video: video, scale: 2)!
+        XCTAssertEqual(zoomed.x, 0.625, accuracy: 0.0001)
+        let panned = normalizePoint(CGPoint(x: 300, y: 125), in: box, video: video, scale: 2, offset: CGSize(width: 100, height: 0))!
+        XCTAssertEqual(panned.x, 0.5, accuracy: 0.0001)
+        XCTAssertTrue(panned.inside)
+        XCTAssertNil(normalizePoint(.zero, in: box, video: video, scale: 0))
+    }
+
     func testWebKeyCode() {
         XCTAssertEqual(webKeyCode(for: "a"), "KeyA")
         XCTAssertEqual(webKeyCode(for: "Z"), "KeyZ")
