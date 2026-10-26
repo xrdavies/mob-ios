@@ -448,10 +448,8 @@ final class AppState: MachineEvents {
 
     func onDesktop(_ m: Machine, _ event: DesktopEvent) {
         guard m.id == activeMachineId else { return }
-        let before = (event as? DesktopEvent).flatMap { ev in
-            if case .desktop(let info) = ev { return desktops.desktops[info.sessionId]?.state }
-            return nil
-        }
+        var before: String?
+        if case .desktop(let info) = event { before = desktops.desktops[info.sessionId]?.state }
         desktops.apply(event)
         // A desktop that just became running: if it's the current chat and the stream is idle/error, reconnect.
         if case .desktop(let info) = event, info.sessionId == chat.currentId, info.state == "running", before != "running" {

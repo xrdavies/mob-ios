@@ -12,7 +12,8 @@ final class Log {
         let error: Bool
         let message: String
 
-        var line: String { "\(Log.time.string(from: at)) \(error ? "ERROR " : "")\(message)" }
+        /// The formatter belongs to the main actor, like every view of the log.
+        @MainActor var line: String { "\(Log.time.string(from: at)) \(error ? "ERROR " : "")\(message)" }
     }
 
     private(set) var entries: [Entry] = []
