@@ -51,6 +51,8 @@ xcodebuild -project mob-ios.xcodeproj -scheme mob-ios -destination 'platform=iOS
 
 `LiveStreamTests` open a real live view and are skipped unless `MOBD_URL` and `MOBD_TOKEN` (a paired device credential) are set; they only move the office pointer. The UI tests (`mob-iosUITests`) drive the app against a real mobd and expect a paired machine in the simulator; they create and send in a new chat.
 
+`LayoutTests.testSettingsAndPairingAcrossRotation` needs no paired machine; repeat it with Device Hub's inner and outer screens. `testPairMachineFromLink` adds a paired device only when `TEST_RUNNER_MOBD_PAIR_LINK` contains a fresh, single-use `mobd link` invitation. Neither layout test sends a chat message.
+
 ## Releases
 
 Not on the App Store yet. Releases go through TestFlight and the App Store by hand (no CI); see [docs/releases.md](docs/releases.md) for the release runbook (signing, App Store Connect, review, checklist).

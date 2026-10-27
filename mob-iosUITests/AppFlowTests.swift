@@ -19,9 +19,10 @@ final class AppFlowTests: XCTestCase {
 
     /// Saves a screenshot next to the test run for review.
     private func shot(_ name: String) {
-        let data = XCUIScreen.main.screenshot().pngRepresentation
+        let screenshot = app.screenshot()
+        let data = screenshot.pngRepresentation
         try? data.write(to: URL(fileURLWithPath: "/tmp/mob-ios-\(name).png"))
-        let a = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        let a = XCTAttachment(screenshot: screenshot)
         a.name = name
         a.lifetime = .keepAlways
         add(a)
@@ -80,10 +81,12 @@ final class AppFlowTests: XCTestCase {
         XCTAssertTrue(thumb.waitForExistence(timeout: 15))
         sleep(4) // a snapshot or live frame arrives
         shot("thumbnail")
-        if UIDevice.current.userInterfaceIdiom == .phone {
+        let field = app.textViews.firstMatch.exists ? app.textViews.firstMatch : app.textFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        // Duo can show a sidebar while still reporting the phone idiom.
+        if thumb.frame.maxY <= field.frame.minY {
             let width = thumb.frame.width
-            XCTAssertGreaterThan(width, app.frame.width * 0.85)
-            let field = app.textFields.firstMatch
+            XCTAssertGreaterThan(width, field.frame.width * 0.85)
             field.tap()
             field.typeText(String(repeating: "Unsent draft text for keyboard layout. ", count: 8))
             XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
@@ -95,13 +98,10 @@ final class AppFlowTests: XCTestCase {
             }
             shot("thumbnail-keyboard")
         }
-        if UIDevice.current.userInterfaceIdiom == .pad {
-            // Landscape iPad has room for the desktop beside the chat.
-            XCUIDevice.shared.orientation = .landscapeLeft
-            sleep(3)
-            shot("thumbnail-landscape")
-            XCUIDevice.shared.orientation = .portrait
-        }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        sleep(3)
+        shot("thumbnail-landscape")
+        XCUIDevice.shared.orientation = .portrait
         thumb.tap()
         XCTAssertTrue(app.buttons["Close"].waitForExistence(timeout: 10))
         sleep(3)
