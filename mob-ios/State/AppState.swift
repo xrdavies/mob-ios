@@ -54,7 +54,7 @@ final class AppState: MachineEvents {
 
     /// The app is on screen (notifications for the open chat are skipped then).
     @ObservationIgnored var foreground = true
-    @ObservationIgnored private var desktopUsers = 0
+    @ObservationIgnored private var desktopSizes = DesktopSizes()
     @ObservationIgnored private var healthTask: Task<Void, Never>?
     /// Global event streams, one per machine, so every Mac can notify (not only the active one).
     @ObservationIgnored private var watchers: [String: MachineWatcher] = [:]
@@ -92,6 +92,7 @@ final class AppState: MachineEvents {
         if changed { saveMachines() }
         chat.onUnauthorized = { [weak self] id in self?.markNeedsPairing(id) }
         chat.onOpen = { [weak self] in self?.followChat() }
+        stream.onReady = { [weak self] in self?.resizeDesktop() }
         stream.onUnauthorized = { [weak self] client in
             self?.noteFailure(APIError(message: "Unauthorized", status: 401), client: client)
         }
@@ -133,7 +134,7 @@ final class AppState: MachineEvents {
                 try? await Task.sleep(for: .seconds(30))
             }
         }
-        if desktopUsers > 0 { connectDesktop() } else { stream.disconnect() }
+        if !desktopSizes.isEmpty { connectDesktop() } else { stream.disconnect() }
     }
 
     func selectMachine(_ id: String) {
@@ -269,7 +270,7 @@ final class AppState: MachineEvents {
             desktops.setEnabled(h.sessionDesktops)
             if h.sessionDesktops && first { desktops.refresh() }
             // The live view waits for health to know whether mobd streams.
-            if first, desktopUsers > 0, stream.state.status == .idle || stream.state.status == .error { connectDesktop() }
+            if first, !desktopSizes.isEmpty, stream.state.status == .idle || stream.state.status == .error { connectDesktop() }
         } catch {
             guard client === apiClient, !(error is CancellationError) else { return }
             if error.isUnauthorized { return markNeedsPairing(m.id) }
@@ -292,15 +293,21 @@ final class AppState: MachineEvents {
 
     // MARK: - Live view
 
-    /// A view that shows the desktop is on screen; the live view stays open while any is.
-    func retainDesktop() {
-        desktopUsers += 1
-        if desktopUsers == 1 { connectDesktop() }
+    func updateDesktopSize(_ id: UUID, size: CGSize, fullScreen: Bool) {
+        guard size.width > 0, size.height > 0 else { return }
+        let first = desktopSizes.isEmpty
+        desktopSizes.update(id, size: size, fullScreen: fullScreen)
+        if first { connectDesktop() } else { resizeDesktop() }
     }
 
-    func releaseDesktop() {
-        desktopUsers -= 1
-        if desktopUsers == 0 { stream.disconnect() }
+    func releaseDesktop(_ id: UUID) {
+        desktopSizes.remove(id)
+        if desktopSizes.isEmpty { stream.disconnect() } else { resizeDesktop() }
+    }
+
+    private func resizeDesktop() {
+        guard health?.supports("streamResize") == true, let size = desktopSizes.size else { return }
+        stream.resize(maxWidth: Int(size.width), maxHeight: Int(size.height))
     }
 
     /// `control` takes control once the new picture arrives (a quality change keeps it).
@@ -314,18 +321,17 @@ final class AppState: MachineEvents {
             return stream.unavailable(noDesktopText)
         }
         let quality = LiveQuality(rawValue: m.liveQuality ?? "") ?? .auto
-        let w = Int(UIScreen.main.bounds.width * UIScreen.main.scale)
-        let h = Int(UIScreen.main.bounds.height * UIScreen.main.scale)
+        guard let size = desktopSizes.size else { return }
         // Remember which transport carried the picture, so the next connect races the WebSocket sooner.
         let id = m.id
         stream.onTransport = { [weak self] t in self?.rememberTransport(id, t) }
-        stream.connect(client: apiClient, maxWidth: devicePixels(CGFloat(w), scale: 1), maxHeight: devicePixels(CGFloat(h), scale: 1),
+        stream.connect(client: apiClient, maxWidth: Int(size.width), maxHeight: Int(size.height),
                        quality: quality, control: control, preferWebSocket: m.liveWebSocket == true, sessionId: sessionId)
     }
 
     /// The open chat changed; reconnect the live view to follow it (session desktops only).
     private func followChat() {
-        guard health?.sessionDesktops == true, desktopUsers > 0 else { return }
+        guard health?.sessionDesktops == true, !desktopSizes.isEmpty else { return }
         connectDesktop(control: stream.state.control)
     }
 
@@ -350,7 +356,7 @@ final class AppState: MachineEvents {
         machines[i].liveQuality = quality.rawValue
         saveMachines()
         // mobd fixes the profile per session: reconnect an open view, keeping control if it was on.
-        if id == activeMachineId, desktopUsers > 0 { connectDesktop(control: stream.state.control) }
+        if id == activeMachineId, !desktopSizes.isEmpty { connectDesktop(control: stream.state.control) }
     }
 
     // MARK: - Events and notifications
@@ -454,7 +460,7 @@ final class AppState: MachineEvents {
         // A desktop that just became running: if it's the current chat and the stream is idle/error, reconnect.
         if case .desktop(let info) = event, info.sessionId == chat.currentId, info.state == "running", before != "running" {
             let s = stream.state.status
-            if desktopUsers > 0 && (s == .idle || s == .error) { connectDesktop(control: stream.state.control) }
+            if !desktopSizes.isEmpty && (s == .idle || s == .error) { connectDesktop(control: stream.state.control) }
         }
     }
 

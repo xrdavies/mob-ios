@@ -40,6 +40,8 @@ final class StreamSession {
     @ObservationIgnored var onUnauthorized: ((APIClient) -> Void)?
     /// Called once per session when a transport wins, so the machine can remember the WebSocket.
     @ObservationIgnored var onTransport: ((LiveTransport) -> Void)?
+    /// The picture or control channel is ready to accept the latest view size.
+    @ObservationIgnored var onReady: (() -> Void)?
     /// Tests only: drop ICE candidates both ways, like a network without UDP.
     @ObservationIgnored var blockWebRTC = false
 
@@ -266,10 +268,16 @@ final class StreamSession {
             state = LiveState(status: .connected, width: width, height: height)
             if via == .webSocket { watchWsStats(a) } else { watchStats(a) }
             if takeControl { setControl(true) }
+            onReady?()
         } else if width != state.width || height != state.height {
             state.width = width
             state.height = height
         }
+    }
+
+    fileprivate func channelReady(_ a: Int) {
+        guard a == attempt else { return }
+        onReady?()
     }
 
     fileprivate func connectionState(_ a: Int, _ s: RTCPeerConnectionState) {
@@ -390,6 +398,7 @@ final class StreamSession {
         guard state.status == .connected, via == .webSocket ? player != nil : channels["control"]?.readyState == .open else { return false }
         guard maxWidth != size.width || maxHeight != size.height else { return true }
         size = (maxWidth, maxHeight)
+        Log.add("live view: resize to \(maxWidth)×\(maxHeight)")
         send([.resize(maxWidth: maxWidth, maxHeight: maxHeight)])
         return true
     }
@@ -503,7 +512,11 @@ private final class Bridge: NSObject, RTCPeerConnectionDelegate, RTCDataChannelD
         Task { @MainActor [weak owner] in owner?.control(a, data) }
     }
 
-    func dataChannelDidChangeState(_ dc: RTCDataChannel) {}
+    func dataChannelDidChangeState(_ dc: RTCDataChannel) {
+        guard dc.label == "control", dc.readyState == .open else { return }
+        let a = attempt
+        Task { @MainActor [weak owner] in owner?.channelReady(a) }
+    }
     func peerConnection(_ pc: RTCPeerConnection, didChange stateChanged: RTCSignalingState) {}
     func peerConnection(_ pc: RTCPeerConnection, didAdd stream: RTCMediaStream) {}
     func peerConnection(_ pc: RTCPeerConnection, didRemove stream: RTCMediaStream) {}

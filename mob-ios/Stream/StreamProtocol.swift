@@ -33,6 +33,25 @@ func devicePixels(_ points: CGFloat, scale: CGFloat) -> Int {
     return min(max(px, 64), 8192)
 }
 
+/// Pixel sizes of visible desktop canvases; a full-screen view takes priority over thumbnails.
+struct DesktopSizes {
+    private var views: [UUID: (size: CGSize, fullScreen: Bool)] = [:]
+
+    var isEmpty: Bool { views.isEmpty }
+    var size: CGSize? {
+        let fullScreen = views.values.filter { $0.fullScreen }
+        return (fullScreen.isEmpty ? Array(views.values) : fullScreen)
+            .max { $0.size.width * $0.size.height < $1.size.width * $1.size.height }?.size
+    }
+
+    mutating func update(_ id: UUID, size: CGSize, fullScreen: Bool) {
+        guard size.width > 0, size.height > 0 else { return }
+        views[id] = (size, fullScreen)
+    }
+
+    mutating func remove(_ id: UUID) { views[id] = nil }
+}
+
 // MARK: - Control channel (from mobd)
 
 enum ControlMessage: Equatable {

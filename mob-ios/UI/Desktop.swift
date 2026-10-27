@@ -4,10 +4,23 @@ import UIKit
 /// Keeps the shared live view open while the calling view is on screen.
 private struct RetainDesktop: ViewModifier {
     @Environment(AppState.self) private var app
+    @Environment(\.displayScale) private var displayScale
+    @State private var id = UUID()
+    @State private var pixels: CGSize = .zero
+    var fullScreen = false
+
     func body(content: Content) -> some View {
         content
-            .onAppear { app.retainDesktop() }
-            .onDisappear { app.releaseDesktop() }
+            .onGeometryChange(for: CGSize.self) { geo in
+                guard geo.size.width > 0, geo.size.height > 0 else { return .zero }
+                return CGSize(width: devicePixels(geo.size.width, scale: displayScale),
+                              height: devicePixels(geo.size.height, scale: displayScale))
+            } action: {
+                pixels = $0
+                app.updateDesktopSize(id, size: $0, fullScreen: fullScreen)
+            }
+            .onAppear { app.updateDesktopSize(id, size: pixels, fullScreen: fullScreen) }
+            .onDisappear { app.releaseDesktop(id) }
     }
 }
 
@@ -34,8 +47,8 @@ struct DesktopThumbnail: View {
             .accessibilityElement(children: .ignore)
             .accessibilityAddTraits(.isButton)
             .accessibilityLabel("Office desktop. Opens full screen.")
-            .padding(.horizontal, 12).padding(.vertical, 8)
             .modifier(RetainDesktop())
+            .padding(.horizontal, 12).padding(.vertical, 8)
             .id(ObjectIdentifier(app.apiClient))
     }
 }
@@ -283,6 +296,7 @@ struct LiveView: View {
                     TouchSurface(control: s.control, handler: handler(size: geo.size, fw: s.width, fh: s.height))
                 }
                 .clipped()
+                .modifier(RetainDesktop(fullScreen: true))
             }
 
             if s.control { KeysBar(typing: $typing) }
@@ -301,7 +315,6 @@ struct LiveView: View {
         }
         .background(Color.black.ignoresSafeArea())
         .background(KeyboardSink(active: $typing && s.control, session: stream))
-        .modifier(RetainDesktop())
         .preferredColorScheme(.dark)
     }
 

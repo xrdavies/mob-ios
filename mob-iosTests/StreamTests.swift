@@ -18,6 +18,27 @@ final class StreamTests: XCTestCase {
         XCTAssertEqual(devicePixels(10000, scale: 1), 8192) // max
     }
 
+    func testDesktopSizesKeepFullScreenPriorityAndIgnoreStaleViews() {
+        var sizes = DesktopSizes()
+        let thumbnail = UUID(), replacement = UUID(), full = UUID()
+        XCTAssertNil(sizes.size)
+        sizes.update(thumbnail, size: CGSize(width: 640, height: 360), fullScreen: false)
+        sizes.update(full, size: CGSize(width: 1280, height: 960), fullScreen: true)
+        sizes.update(thumbnail, size: CGSize(width: 1920, height: 1080), fullScreen: false)
+        XCTAssertEqual(sizes.size, CGSize(width: 1280, height: 960))
+        sizes.update(full, size: CGSize(width: 960, height: 1280), fullScreen: true)
+        XCTAssertEqual(sizes.size, CGSize(width: 960, height: 1280))
+        sizes.update(full, size: .zero, fullScreen: true)
+        XCTAssertEqual(sizes.size, CGSize(width: 960, height: 1280))
+        sizes.remove(full)
+        XCTAssertEqual(sizes.size, CGSize(width: 1920, height: 1080))
+        sizes.update(replacement, size: CGSize(width: 800, height: 600), fullScreen: false)
+        sizes.remove(thumbnail)
+        XCTAssertEqual(sizes.size, CGSize(width: 800, height: 600))
+        sizes.remove(replacement)
+        XCTAssertTrue(sizes.isEmpty)
+    }
+
     func testControlMessageParsing() {
         let stats = ControlMessage.parse("""
         {"t":"stats","kbps":1200,"width":1920,"height":1080,"fps":30,"loss":0.01,"rttMs":25}
