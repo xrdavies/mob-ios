@@ -1,0 +1,35 @@
+name: CI
+# Checks every push to main and every pull request to main (other branches run nothing until a
+# pull request is open). iPhone test builds go through TestFlight (make archive), not Actions.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  test:
+    # macOS 26 has Xcode 26, which the project is built with.
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build and unit tests
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          # The newest iPhone simulator on the runner (the Makefile names a local one).
+          udid=$(xcrun simctl list devices available -j |
+            jq -r '[.devices | to_entries[] | select(.key | test("iOS")) | .value[] | select(.name | startswith("iPhone"))] | last | .udid')
+          test -n "$udid" && test "$udid" != null
+          xcodebuild -project mob-ios.xcodeproj -scheme mob-ios -destination "id=$udid" \
+            -only-testing:mob-iosTests CODE_SIGNING_ALLOWED=NO test
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Release tools
+        run: node --test .github/release/*.test.mjs
