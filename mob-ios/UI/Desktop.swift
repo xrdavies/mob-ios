@@ -7,20 +7,27 @@ private struct RetainDesktop: ViewModifier {
     @Environment(\.displayScale) private var displayScale
     @State private var id = UUID()
     @State private var pixels: CGSize = .zero
+    @State private var visible = false
     var fullScreen = false
 
     func body(content: Content) -> some View {
         content
             .onGeometryChange(for: CGSize.self) { geo in
-                guard geo.size.width > 0, geo.size.height > 0 else { return .zero }
+                guard geo.size.width > 1, geo.size.height > 1 else { return .zero }
                 return CGSize(width: devicePixels(geo.size.width, scale: displayScale),
                               height: devicePixels(geo.size.height, scale: displayScale))
             } action: {
                 pixels = $0
-                app.updateDesktopSize(id, size: $0, fullScreen: fullScreen)
+                if visible { app.updateDesktopSize(id, size: $0, fullScreen: fullScreen) }
             }
-            .onAppear { app.updateDesktopSize(id, size: pixels, fullScreen: fullScreen) }
-            .onDisappear { app.releaseDesktop(id) }
+            .onAppear {
+                visible = true
+                app.updateDesktopSize(id, size: pixels, fullScreen: fullScreen)
+            }
+            .onDisappear {
+                visible = false
+                app.releaseDesktop(id)
+            }
     }
 }
 

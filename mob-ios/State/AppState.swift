@@ -55,6 +55,7 @@ final class AppState: MachineEvents {
     /// The app is on screen (notifications for the open chat are skipped then).
     @ObservationIgnored var foreground = true
     @ObservationIgnored private var desktopSizes = DesktopSizes()
+    @ObservationIgnored private var desktopResizeTask: Task<Void, Never>?
     @ObservationIgnored private var healthTask: Task<Void, Never>?
     /// Global event streams, one per machine, so every Mac can notify (not only the active one).
     @ObservationIgnored private var watchers: [String: MachineWatcher] = [:]
@@ -294,20 +295,28 @@ final class AppState: MachineEvents {
     // MARK: - Live view
 
     func updateDesktopSize(_ id: UUID, size: CGSize, fullScreen: Bool) {
-        guard size.width > 0, size.height > 0 else { return }
         let first = desktopSizes.isEmpty
         desktopSizes.update(id, size: size, fullScreen: fullScreen)
-        if first { connectDesktop() } else { resizeDesktop() }
+        if first || stream.state.status == .idle { connectDesktop() } else { resizeDesktop() }
     }
 
     func releaseDesktop(_ id: UUID) {
         desktopSizes.remove(id)
-        if desktopSizes.isEmpty { stream.disconnect() } else { resizeDesktop() }
+        if desktopSizes.isEmpty {
+            desktopResizeTask?.cancel()
+            stream.disconnect()
+        } else { resizeDesktop() }
     }
 
     private func resizeDesktop() {
-        guard health?.supports("streamResize") == true, let size = desktopSizes.size else { return }
-        stream.resize(maxWidth: Int(size.width), maxHeight: Int(size.height))
+        desktopResizeTask?.cancel()
+        desktopResizeTask = Task { [weak self] in
+            // A fold or rotation can produce several intermediate layouts in one transition.
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled, let self, health?.supports("streamResize") == true,
+                  let size = desktopSizes.size else { return }
+            stream.resize(maxWidth: Int(size.width), maxHeight: Int(size.height))
+        }
     }
 
     /// `control` takes control once the new picture arrives (a quality change keeps it).

@@ -39,6 +39,24 @@ final class StreamTests: XCTestCase {
         XCTAssertTrue(sizes.isEmpty)
     }
 
+    func testVisibleDesktopWaitsForGeometryWithoutLosingTheOtherView() {
+        var sizes = DesktopSizes()
+        let thumbnail = UUID(), full = UUID()
+        sizes.update(thumbnail, size: .zero, fullScreen: false)
+        XCTAssertFalse(sizes.isEmpty)
+        XCTAssertNil(sizes.size)
+        sizes.update(thumbnail, size: CGSize(width: 640, height: 360), fullScreen: false)
+        sizes.update(full, size: .zero, fullScreen: true)
+        XCTAssertEqual(sizes.size, CGSize(width: 640, height: 360))
+        sizes.remove(thumbnail)
+        XCTAssertFalse(sizes.isEmpty)
+        XCTAssertNil(sizes.size)
+        sizes.update(full, size: CGSize(width: 1280, height: 960), fullScreen: true)
+        XCTAssertEqual(sizes.size, CGSize(width: 1280, height: 960))
+        sizes.remove(full)
+        XCTAssertTrue(sizes.isEmpty)
+    }
+
     func testControlMessageParsing() {
         let stats = ControlMessage.parse("""
         {"t":"stats","kbps":1200,"width":1920,"height":1080,"fps":30,"loss":0.01,"rttMs":25}

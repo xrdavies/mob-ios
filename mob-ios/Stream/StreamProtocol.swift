@@ -39,13 +39,17 @@ struct DesktopSizes {
 
     var isEmpty: Bool { views.isEmpty }
     var size: CGSize? {
-        let fullScreen = views.values.filter { $0.fullScreen }
-        return (fullScreen.isEmpty ? Array(views.values) : fullScreen)
+        let sized = views.values.filter { $0.size.width > 0 && $0.size.height > 0 }
+        let fullScreen = sized.filter { $0.fullScreen }
+        return (fullScreen.isEmpty ? sized : fullScreen)
             .max { $0.size.width * $0.size.height < $1.size.width * $1.size.height }?.size
     }
 
     mutating func update(_ id: UUID, size: CGSize, fullScreen: Bool) {
-        guard size.width > 0, size.height > 0 else { return }
+        guard size.width > 0, size.height > 0 else {
+            if views[id] == nil { views[id] = (.zero, fullScreen) }
+            return
+        }
         views[id] = (size, fullScreen)
     }
 
