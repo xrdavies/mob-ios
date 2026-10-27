@@ -17,24 +17,21 @@ final class AppFlowTests: XCTestCase {
         app.tap() // lets the interruption monitor run
     }
 
-    /// Saves a screenshot next to the test run for review.
-    private func shot(_ name: String) {
-        let screenshot = app.screenshot()
-        let data = screenshot.pngRepresentation
-        try? data.write(to: URL(fileURLWithPath: "/tmp/mob-ios-\(name).png"))
-        let a = XCTAttachment(screenshot: screenshot)
-        a.name = name
-        a.lifetime = .keepAlways
-        add(a)
+    override func tearDown() {
+        if app.staticTexts["Controlling"].exists, app.buttons["View"].exists { app.buttons["View"].tap() }
+        super.tearDown()
     }
 
-    func testSendAndStreamReply() {
-        let newChat = app.buttons["New chat"]
+    func testSendAndStreamReply() throws {
+        guard ProcessInfo.processInfo.environment["MOBD_SEND_TEST_MESSAGE"] == "1" else {
+            throw XCTSkip("Set MOBD_SEND_TEST_MESSAGE=1 after approving a real model request")
+        }
+        let newChat = app.buttons["New chat"].firstMatch
         XCTAssertTrue(newChat.waitForExistence(timeout: 15))
-        newChat.tap()
+        if newChat.isEnabled { newChat.tap() }
         // Never send into an existing chat: the empty new-chat screen must be showing.
         XCTAssertTrue(app.staticTexts["New chat on Office Mac"].waitForExistence(timeout: 5), "new chat did not open")
-        let field = app.textFields.firstMatch
+        let field = app.descendants(matching: .any)["composer"]
         XCTAssertTrue(field.waitForExistence(timeout: 10))
         field.tap()
         field.typeText("Reply with the word pong. Do not use tools.")
@@ -53,8 +50,8 @@ final class AppFlowTests: XCTestCase {
         let search = app.searchFields["Search chats"]
         XCTAssertTrue(search.waitForExistence(timeout: 5))
         search.tap()
-        search.typeText("chrome")
-        XCTAssertTrue(app.buttons.containing(NSPredicate(format: "label CONTAINS '使用chrome'")).firstMatch.waitForExistence(timeout: 5))
+        search.typeText("mob-test-no-matching-chat-7c2f")
+        XCTAssertTrue(app.staticTexts["No chats match"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Recent"].exists)
         shot("search")
         // iOS 26 closes search with a round button next to the field.
@@ -73,7 +70,94 @@ final class AppFlowTests: XCTestCase {
         shot("log")
     }
 
+    func testDraftSurvivesRotationAndBackground() {
+        let newChat = app.buttons["New chat"].firstMatch
+        XCTAssertTrue(newChat.waitForExistence(timeout: 15))
+        if newChat.isEnabled { newChat.tap() }
+        let draft = "Unsent Duo layout regression draft"
+        let field = app.descendants(matching: .any)["composer"]
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        field.tap()
+        field.typeText(draft)
+        defer { XCUIDevice.shared.orientation = .portrait }
+        for orientation: UIDeviceOrientation in [.landscapeLeft, .portrait] {
+            XCUIDevice.shared.orientation = orientation
+            XCTAssertEqual(field.value as? String, draft)
+            XCTAssertTrue(field.isHittable)
+            XCTAssertTrue(app.buttons["Send"].isHittable)
+            shot("draft-\(orientation.rawValue)")
+        }
+        XCUIApplication(bundleIdentifier: "com.apple.Preferences").launch()
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 10), "The app did not enter the background")
+        app.activate()
+        XCTAssertEqual(field.value as? String, draft)
+        XCTAssertTrue(app.buttons["Send"].isHittable)
+        shot("draft-restored")
+    }
+
+    /// The operator folds/unfolds in Device Hub after each printed checkpoint.
+    func testDraftAcrossDisplayChanges() throws {
+        guard let count = ProcessInfo.processInfo.environment["MOBD_DISPLAY_CHANGES"].flatMap(Int.init), count > 0 else {
+            throw XCTSkip("Set MOBD_DISPLAY_CHANGES and change the active display at each checkpoint")
+        }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
+        let newChat = app.buttons["New chat"].firstMatch
+        XCTAssertTrue(newChat.waitForExistence(timeout: 15))
+        if newChat.isEnabled { newChat.tap() }
+        let field = app.descendants(matching: .any)["composer"]
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        let draft = "Unsent Duo folding regression draft"
+        field.tap()
+        field.typeText(draft)
+        for step in 1...count {
+            let before = app.windows.firstMatch.frame.size
+            print("display-transition[\(step)]: waiting at \(before)")
+            let changed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                self.app.windows.firstMatch.frame.size != before
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [changed], timeout: 90), .completed)
+            XCTAssertEqual(field.value as? String, draft)
+            XCTAssertTrue(field.isHittable)
+            XCTAssertTrue(app.buttons["Send"].isHittable)
+            shot("display-transition-\(step)")
+        }
+    }
+
+    func testLiveViewResizeAndControlRelease() {
+        defer { XCUIDevice.shared.orientation = .portrait }
+        let show = app.buttons["Show desktop"]
+        XCTAssertTrue(show.waitForExistence(timeout: 15))
+        show.tap()
+        let thumbnail = app.buttons["Office desktop. Opens full screen."]
+        XCTAssertTrue(thumbnail.waitForExistence(timeout: 15))
+        thumbnail.tap()
+        XCTAssertTrue(app.staticTexts["Live"].waitForExistence(timeout: 20), "No decoded live frame")
+        let control = app.buttons["Control"]
+        XCTAssertTrue(control.isHittable)
+        control.tap()
+        XCTAssertTrue(app.staticTexts["Controlling"].waitForExistence(timeout: 5))
+        XCUIApplication(bundleIdentifier: "com.apple.Preferences").launch()
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 10), "The app did not enter the background")
+        app.activate()
+        XCTAssertTrue(app.staticTexts["Live"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Controlling"].exists)
+        for orientation: UIDeviceOrientation in [.landscapeLeft, .portrait] {
+            XCUIDevice.shared.orientation = orientation
+            XCTAssertTrue(app.buttons["Close"].isHittable)
+            XCTAssertTrue(app.staticTexts["Live"].exists)
+        }
+        shot("live-resized")
+        app.buttons["Close"].tap()
+        app.buttons["Settings"].firstMatch.tap()
+        app.swipeUp()
+        app.buttons["Log"].tap()
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'live view: resize to'")).firstMatch.waitForExistence(timeout: 10), "The UI never sent a resize")
+        shot("live-resize-log")
+    }
+
     func testDesktopThumbnailAndFullScreen() {
+        defer { XCUIDevice.shared.orientation = .portrait }
         let show = app.buttons["Show desktop"]
         XCTAssertTrue(show.waitForExistence(timeout: 15))
         show.tap()
@@ -81,7 +165,7 @@ final class AppFlowTests: XCTestCase {
         XCTAssertTrue(thumb.waitForExistence(timeout: 15))
         sleep(4) // a snapshot or live frame arrives
         shot("thumbnail")
-        let field = app.textViews.firstMatch.exists ? app.textViews.firstMatch : app.textFields.firstMatch
+        let field = app.descendants(matching: .any)["composer"]
         XCTAssertTrue(field.waitForExistence(timeout: 10))
         // Duo can show a sidebar while still reporting the phone idiom.
         if thumb.frame.maxY <= field.frame.minY {
@@ -107,5 +191,20 @@ final class AppFlowTests: XCTestCase {
         sleep(3)
         shot("fullscreen")
         app.buttons["Close"].tap()
+    }
+}
+
+extension XCTestCase {
+    /// Saves a screenshot next to the test run for review.
+    func shot(_ name: String) {
+        for (index, screen) in XCUIScreen.screens.enumerated() {
+            let screenshot = screen.screenshot()
+            let label = "\(name)-display-\(index)"
+            try? screenshot.pngRepresentation.write(to: URL(fileURLWithPath: "/tmp/mob-ios-\(label).png"))
+            let attachment = XCTAttachment(screenshot: screenshot)
+            attachment.name = label
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
     }
 }

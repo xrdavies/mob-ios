@@ -63,6 +63,7 @@ struct Composer: View {
                     .font(.caption).foregroundStyle(.red)
             }
             TextField(placeholder(canSteer: canSteer, busy: busy), text: $draft.text, axis: .vertical)
+                .accessibilityIdentifier("composer")
                 .lineLimit(1...6)
                 .focused($focused)
                 .padding(10)

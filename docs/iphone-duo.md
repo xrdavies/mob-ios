@@ -1,30 +1,30 @@
 # iPhone Duo 适配任务
 
-记录日期：2026-10-27。状态：进行中，已完成首轮模拟器冒烟测试，尚未完成 Duo 验收。
+记录日期：2026-10-27。状态：进行中，已修复串流尺寸同步并扩展模拟器回归，完整 Duo 验收仍有受阻项目。
 
 目标：复用现有 iPhone/iPad 自适应界面，让聊天和远程桌面在内外屏切换、旋转、分屏和折叠时可用，保留 iOS 17 支持。
 
 ## 当前基础与缺口
 
 - 工程已支持 iPhone + iPad；[ChatView](../mob-ios/UI/ChatView.swift) 使用 size class 切换导航，并按容器宽度排列聊天和桌面。
-- [AppState.connectDesktop](../mob-ios/State/AppState.swift) 仍从 `UIScreen.main` 获取串流初始尺寸，不适合内外屏和分屏场景。
-- [StreamSession.resize](../mob-ios/Stream/StreamSession.swift) 已实现，生产 UI 尚未调用；README 中“尺寸变化自动发送 resize”的描述与实现不符。
+- [AppState.connectDesktop](../mob-ios/State/AppState.swift) 已改用实际画面容器和 `displayScale`；全屏尺寸优先，关闭后恢复缩略图尺寸。
+- [StreamSession.resize](../mob-ios/Stream/StreamSession.swift) 已接到生产 UI；容器变化及视频/控制通道就绪时同步，受服务端 `streamResize` 能力保护。
 - mobd 已提供 `streamResize` 能力；优先复用现有协议。
 - [AppFlowTests](../mob-iosUITests/AppFlowTests.swift) 已改按实际聊天区域检查缩略图布局；新增配对和旋转检查，仍需补齐完整折叠场景。
 
 ## 1. 构建环境
 
-- [ ] 使用 Xcode 27.1 或更新版本、iOS 27.1 或更新 SDK，完成 Debug/Release 构建并检查 WebRTC 二进制依赖兼容性。
-- [ ] 保留 iOS 17 deployment target；若使用新 API，添加可用性判断和旧系统回退。
+- [x] 使用 Xcode 27.1 或更新版本、iOS 27.1 或更新 SDK，完成 Debug/Release 构建并检查 WebRTC 二进制依赖兼容性。
+- [x] 保留 iOS 17 deployment target；若使用新 API，添加可用性判断和旧系统回退。
 
 ## 2. 远程桌面尺寸（优先修复）
 
-涉及：`State/AppState.swift`、`UI/Desktop.swift`、`Stream/StreamSession.swift`；复用 `StreamProtocol.swift` 中的 `devicePixels`。
+涉及：`State/AppState.swift`、`UI/Desktop.swift`、`Stream/StreamSession.swift`；复用 `StreamProtocol.swift` 中的 `devicePixels`。下列已勾选项表示代码与小范围回归已完成，完整设备场景结果另见验收矩阵。
 
-- [ ] 初次连接和重连使用实际画面容器尺寸及 `displayScale`，替换 `UIScreen.main`。
-- [ ] 在容器尺寸或缩放比例变化、连接就绪时同步最新尺寸；支持内外屏切换、旋转、分屏和键盘开合。
-- [ ] 检查服务端 `streamResize` 能力后调用已有 `resize`，避免因纯尺寸变化反复重连；旧 mobd 保持可用。
-- [ ] 缩略图与全屏视图同时存在时，避免互相覆盖串流目标尺寸。
+- [x] 初次连接和重连使用实际画面容器尺寸及 `displayScale`，替换 `UIScreen.main`。
+- [x] 在容器尺寸或缩放比例变化、连接就绪时同步最新尺寸；支持内外屏切换、旋转、分屏和键盘开合。
+- [x] 检查服务端 `streamResize` 能力后调用已有 `resize`，避免因纯尺寸变化反复重连；旧 mobd 保持可用。
+- [x] 缩略图与全屏视图同时存在时，避免互相覆盖串流目标尺寸。
 - [ ] 尺寸变化后验证画面清晰度、黑边、缩放和平移边界、点击坐标及拖动结束时的按键释放。
 
 ## 3. 导航、输入与折叠布局
@@ -41,7 +41,7 @@
 涉及：`mob-iosUITests/AppFlowTests.swift`、`mob-iosTests/StreamTests.swift`、`mob-iosTests/LiveStreamTests.swift`。
 
 - [x] UI 测试改按实际布局断言，移除 `.phone` 必然窄屏、`.pad` 才有侧栏的假设。
-- [ ] 为 UI 到串流的尺寸同步补小范围回归测试；现有直播测试仅直接调用 `resize`，不能证明 UI 已接线。
+- [x] 为 UI 到串流的尺寸同步补小范围回归测试；现有直播测试仅直接调用 `resize`，不能证明 UI 已接线。
 - [ ] 在 Device Hub 验证：外屏横竖屏、内屏横竖屏、连续展开/合上、半折叠、左右分屏及键盘开合。
 - [ ] 使用专用测试 mobd，分别验证 WebRTC 和 WebSocket 路径：尺寸更新、持续出帧、点击/拖动/滚动/缩放、连接切换及后台释放输入。
 - [ ] 回归普通 iPhone、iPad 和 iOS 17；在 Duo 真机确认手势、折叠、视频稳定性和 VoiceOver。
@@ -62,10 +62,44 @@
 
 本机测试结果：`/tmp/mob-ios-duo-signed-unit.xcresult`、`/tmp/mob-ios-duo-pair-link.xcresult`、`/tmp/mob-ios-duo-outer-ui.xcresult`、`/tmp/mob-ios-duo-inner-ui-final.xcresult`；构建日志：`/tmp/mob-ios-duo-build.log`、`/tmp/mob-ios-duo-release.log`。这些临时文件和配对凭据未提交仓库。
 
+### 2026-10-28 补测记录
+
+应用修复提交：`e4e6b33`、`e10ea29`。后者增加 150 ms 尺寸合并、可见性检查及首次布局前的视图登记，避免瞬时小尺寸和隐藏视图回调干扰串流。环境沿用 Xcode 27.1、Duo iOS 27.1；对照设备为 iPhone 18 Pro 和 iPad Pro 13-inch (M5)，均为 iOS 27.0（24A434）模拟器。
+
+| 项目 | 结果与边界 |
+| --- | --- |
+| Duo 单元测试 | 63 项通过，包含全屏尺寸优先、旋转、零尺寸、首次布局等待和过期视图移除回归 |
+| 普通 iPhone / iPad | 各 63 项单元测试通过；不是这两类设备的完整 UI/真机验收 |
+| WebRTC、UDP 阻断后的 WebSocket、记忆的 WebSocket、恢复 WebRTC | 4 项通过，结果包归档完成；持续出帧、指针坐标回报、640×360 resize、WebSocket 解码均有断言 |
+| 首帧观测 | 一次复测为 WebRTC 262 ms，阻断 UDP 后 WebSocket 5431 ms；记忆的 WebSocket 1307 ms，恢复 WebRTC 428 ms。单次局域网观测，不代表真实网络性能 |
+| 会话列表 / 设置 / 配对布局 / 桌面查看 | 通过；搜索改用无匹配结果，去掉对用户既有聊天内容的依赖 |
+| 草稿旋转及前后台 | 通过；打开系统设置，并断言 Mob 确实进入后台，再返回检查草稿、输入框和 Send |
+| UI 到串流尺寸同步 / 后台退出 Control | 通过；实际解码画面、全屏 UI 发出 resize、后台恢复到 View 均有断言。上述 UI 场景合并运行共 5 项，零失败，结果包完整 |
+| 真实消息发送与流式回复 | 未发送：发送授权超时，工具要求按拒绝处理。新增 `MOBD_SEND_TEST_MESSAGE=1` 显式开关，默认跳过 |
+| 点击、右键、文本、方向键、拖动、滚轮及后台释放 | 已补两种传输的可选测试和本地输入窗口；Mac 锁屏且解锁询问超时，尚未完成实际输入验收 |
+| 连续折叠、半折叠、真实分屏 | 待解锁后在 Device Hub 执行；新增等待实际窗口尺寸变化的草稿断言。尝试运行时没有发生尺寸切换而超时，不计为通过，也不能据此判定产品失败 |
+| 附件、滚动位置、触摸缩放/平移、弱网/真实远程通道 | 未完成专项验收 |
+| iOS 17 / Duo 真机 / VoiceOver | 当前没有安装 iOS 17 runtime，也没有连接真机；编译目标 17.0 不等于旧系统或真机验证 |
+
+补测同时修正了两处测试假设：内屏存在多个 New chat 按钮，需明确匹配；按 Home 不保证当前内屏应用进入后台，改为打开系统设置并检查应用状态。Mac 锁屏时不向登录界面发送测试文本。
+
+直播测试可直接复用已配对机器的 Keychain 凭据，不导出 token。真实输入测试要求本机探针持续更新、Mac 已解锁且 mobd 地址属于该电脑；输入只在覆盖桌面的测试窗口中进行。运行方法见 [README](../README.md#setup)。
+
+Xcode 首次在用例结束后自动采集模拟器诊断时停滞；采样栈定位到 `simctl diagnose`。重跑添加 `-collect-test-diagnostics never` 后正常生成结果包，不使用先前未归档的结果作为整轮通过依据。运行时仍有 XCTest/WebRTC 的内部 QoS 提示，保留在报告中。
+
+本机证据（未提交）：
+
+- 单元：`/tmp/mob-duo-gap-final-unit.xcresult`、`/tmp/mob-phone-gap-final-unit.xcresult`、`/tmp/mob-ipad-gap-final-unit.xcresult`。
+- 直播：`/tmp/mob-duo-gap-live-final.xcresult`；首帧观测另见 `/tmp/mob-duo-gap-live-verified.log`。
+- UI：`/tmp/mob-duo-gap-final-ui.xcresult`（5 项）；共享逐屏截图方法另跑 `/tmp/mob-duo-gap-shared-capture-ui.xcresult`（1 项）。逐屏截图已确认内屏可读，修复了只截主屏导致的黑图。
+- Release：`/tmp/mob-duo-gap-final-release.log`；仍保留 iOS 17.0 deployment target。
+
+
 ## 5. 发布材料
 
-- [ ] 验证后更新 README 的工具链要求、Duo 支持状态和 `resize` 行为说明。
-- [ ] 在 [发布清单](releases.md) 中补 Duo 验收项，并准备内外屏截图及 App Store Connect 素材。
+- [x] 更新 README 的已测工具链、Duo 验收边界和实际 `resize` 行为说明。
+- [x] 在 [发布清单](releases.md) 中补 Duo 验收项。
+- [ ] 准备验收通过后的内外屏商店截图及 App Store Connect 素材。
 
 ## 官方参考
 

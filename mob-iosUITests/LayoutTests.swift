@@ -31,10 +31,7 @@ final class LayoutTests: XCTestCase {
         let networkAllow = springboard.alerts.buttons["Allow"]
         if networkAllow.waitForExistence(timeout: 3) { networkAllow.tap() }
         XCTAssertTrue(app.staticTexts["Connected to Office Mac"].waitForExistence(timeout: 25))
-        let attachment = XCTAttachment(screenshot: app.screenshot())
-        attachment.name = "paired-settings"
-        attachment.lifetime = .keepAlways
-        add(attachment)
+        shot("paired-settings")
     }
 
     func testSettingsAndPairingAcrossRotation() {
@@ -60,10 +57,7 @@ final class LayoutTests: XCTestCase {
             XCTAssertTrue(cancel.isHittable, "Pairing cannot be closed after rotation")
             XCTAssertTrue(app.buttons["Scan QR code"].isHittable)
             XCTAssertFalse(app.buttons["Pair"].isEnabled)
-            let attachment = XCTAttachment(screenshot: app.screenshot())
-            attachment.name = "pairing-\(orientation.rawValue)"
-            attachment.lifetime = .keepAlways
-            add(attachment)
+            shot("pairing-\(orientation.rawValue)")
         }
 
         let link = app.textViews.firstMatch.exists ? app.textViews.firstMatch : app.textFields.firstMatch
@@ -71,10 +65,7 @@ final class LayoutTests: XCTestCase {
         link.typeText("invalid-pairing-link")
         XCTAssertFalse(app.buttons["Pair"].isEnabled, "An invalid link must not enable pairing")
         XCTAssertTrue(app.buttons["Cancel"].firstMatch.isHittable, "Keyboard covers the close button")
-        let attachment = XCTAttachment(screenshot: app.screenshot())
-        attachment.name = "pairing-keyboard"
-        attachment.lifetime = .keepAlways
-        add(attachment)
+        shot("pairing-keyboard")
         app.buttons["Cancel"].firstMatch.tap()
         XCTAssertTrue(app.buttons["Add machine"].waitForExistence(timeout: 5))
     }
