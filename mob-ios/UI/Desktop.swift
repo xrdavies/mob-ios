@@ -297,10 +297,13 @@ struct LiveView: View {
                 ZStack {
                     DesktopCanvas()
                         .id(ObjectIdentifier(app.apiClient))
+                        // Zoomed video must not intercept the controls outside the canvas.
+                        .allowsHitTesting(false)
                         .scaleEffect(scale)
                         .offset(offset)
                     if s.control, let mark { marker(mark, in: geo.size, fw: s.width, fh: s.height) }
                     TouchSurface(control: s.control, handler: handler(size: geo.size, fw: s.width, fh: s.height))
+                        .accessibilityIdentifier("desktopTouchSurface")
                 }
                 .clipped()
                 .modifier(RetainDesktop(fullScreen: true))

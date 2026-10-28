@@ -156,6 +156,119 @@ final class AppFlowTests: XCTestCase {
         shot("live-resize-log")
     }
 
+    func testLiveTouchCoordinatesAndZoom() throws {
+        guard let path = ProcessInfo.processInfo.environment["MOBD_INPUT_PROBE_PATH"] else {
+            throw XCTSkip("Run the local input probe and set MOBD_INPUT_PROBE_PATH")
+        }
+        func probe() throws -> [String: Any] {
+            let data = try Data(contentsOf: URL(fileURLWithPath: path))
+            let p = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            XCTAssertEqual(p["name"] as? String, "mob-ios-input-probe")
+            XCTAssertEqual(p["ready"] as? Bool, true)
+            XCTAssertLessThan(Date().timeIntervalSince1970 - (p["at"] as? Double ?? 0), 2)
+            return p
+        }
+        let initial = try probe()
+        let width = try XCTUnwrap(initial["width"] as? Double)
+        let height = try XCTUnwrap(initial["height"] as? Double)
+        let baseline = (initial["events"] as? [[String: Any]] ?? []).count
+        // This input test requires a single machine/address, pointing at this Mac.
+        app.buttons["Settings"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Connected to Office Mac"].waitForExistence(timeout: 15))
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Edit '")).count, 1)
+        let addresses = Set(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'http'")).allElementsBoundByIndex.compactMap { URL(string: $0.label) }
+            .filter { ["http", "https"].contains($0.scheme ?? "") })
+        XCTAssertEqual(addresses.count, 1)
+        let host = try XCTUnwrap(addresses.first?.host)
+        XCTAssertTrue((initial["hosts"] as? [String] ?? []).contains(host), "The app must target the local probe's Mac")
+        app.buttons["Chat"].firstMatch.tap()
+        func events(_ kind: String) -> [[String: Any]] {
+            let p = try? probe()
+            return (p?["events"] as? [[String: Any]] ?? []).dropFirst(baseline).filter { $0["kind"] as? String == kind }
+        }
+        func waitFor(_ kind: String, _ count: Int) {
+            let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in events(kind).count >= count }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 5), .completed)
+        }
+        defer { XCUIDevice.shared.orientation = .portrait }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let show = app.buttons["Show desktop"]
+        XCTAssertTrue(show.waitForExistence(timeout: 15))
+        show.tap()
+        let thumb = app.buttons["Office desktop. Opens full screen."]
+        XCTAssertTrue(thumb.waitForExistence(timeout: 15))
+        thumb.tap()
+        XCTAssertTrue(app.staticTexts["Live"].waitForExistence(timeout: 20))
+        let canvas = app.otherElements["desktopTouchSurface"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5), app.debugDescription)
+        func point(_ x: CGFloat, _ y: CGFloat) -> XCUICoordinate {
+            canvas.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: x, dy: y))
+        }
+        func videoSize() -> CGSize {
+            let size = canvas.frame.size
+            let scale = min(size.width / width, size.height / height)
+            return CGSize(width: width * scale, height: height * scale)
+        }
+        canvas.tap()
+        Thread.sleep(forTimeInterval: 0.5)
+        XCTAssertEqual(events("down").count, 0, "View mode sent a tap")
+        canvas.pinch(withScale: 2, velocity: 1)
+        _ = try probe()
+        app.buttons["Control"].tap()
+        shot("live-touch-control")
+        XCTAssertTrue(app.staticTexts["Controlling"].waitForExistence(timeout: 5), app.debugDescription)
+        let size = canvas.frame.size
+        point(size.width / 2 + videoSize().width / 4, size.height / 2).tap()
+        waitFor("down", 1)
+        let zoomed = try XCTUnwrap(events("down").last?["x"] as? Double)
+        XCTAssertGreaterThan(zoomed, width / 2 + 10)
+        XCTAssertLessThan(zoomed, width * 0.75 - 10, "Pinch did not change the mapped coordinate")
+        app.buttons["View"].tap()
+        point(size.width / 2, size.height / 2).press(forDuration: 0.1, thenDragTo: point(size.width / 2 + 40, size.height / 2))
+        app.buttons["Control"].tap()
+        canvas.tap()
+        waitFor("down", 2)
+        XCTAssertLessThan(try XCTUnwrap(events("down").last?["x"] as? Double), width / 2 - 10, "View pan did not move the picture")
+        app.buttons["View"].tap()
+        canvas.doubleTap()
+        app.buttons["Control"].tap()
+        let video = videoSize()
+        if size.height - video.height > 12 || size.width - video.width > 12 {
+            let margin = size.height - video.height > 12 ? CGPoint(x: size.width / 2, y: 4) : CGPoint(x: 4, y: size.height / 2)
+            point(margin.x, margin.y).tap()
+            Thread.sleep(forTimeInterval: 0.5)
+            XCTAssertEqual(events("down").count, 2, "A letterbox tap reached the Mac")
+        }
+        point(size.width / 2 + videoSize().width / 4, size.height / 2).tap()
+        waitFor("down", 3)
+        XCTAssertEqual(try XCTUnwrap(events("down").last?["x"] as? Double), width * 0.75, accuracy: 4)
+        XCTAssertEqual(try XCTUnwrap(events("down").last?["y"] as? Double), height / 2, accuracy: 4)
+        XCUIDevice.shared.orientation = .portrait
+        canvas.tap()
+        waitFor("down", 4)
+        XCTAssertEqual(try XCTUnwrap(events("down").last?["x"] as? Double), width / 2, accuracy: 4)
+        XCTAssertEqual(try XCTUnwrap(events("down").last?["y"] as? Double), height / 2, accuracy: 4)
+        canvas.press(forDuration: 0.8)
+        waitFor("rightDown", 1)
+        let rotated = canvas.frame.size
+        let rotatedVideo = videoSize()
+        point(rotated.width / 2 - rotatedVideo.width * 0.1, rotated.height / 2)
+            .press(forDuration: 0.1, thenDragTo: point(rotated.width / 2 + rotatedVideo.width * 0.1, rotated.height / 2))
+        waitFor("drag", 1)
+        waitFor("up", 5)
+        XCTAssertEqual(try XCTUnwrap(events("up").last?["x"] as? Double), width * 0.6, accuracy: 4)
+        app.buttons["Keyboard"].tap()
+        app.typeText("duo-ui")
+        let typed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            events("keyDown").compactMap { $0["text"] as? String }.joined().contains("duo-ui")
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [typed], timeout: 5), .completed)
+        app.buttons["Keyboard"].tap()
+        app.buttons["View"].tap()
+        shot("live-touch-zoom")
+        app.buttons["Close"].tap()
+    }
+
     func testDesktopThumbnailAndFullScreen() {
         defer { XCUIDevice.shared.orientation = .portrait }
         let show = app.buttons["Show desktop"]
