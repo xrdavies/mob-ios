@@ -108,7 +108,7 @@ Xcode 首次在用例结束后自动采集模拟器诊断时停滞；采样栈�
 | 全屏触摸、缩放与平移 | 发现并修复缩放后视频层越界拦截 View/Control 按钮的问题：视频层关闭命中测试，沿用既有手势层。UI 回归通过，覆盖缩放、平移、双击复位、黑边拒绝输入、旋转后坐标、长按右键、拖动结束和键盘文本，探针收到 43 个原生事件 |
 | 聊天历史滚动位置 | 未通过：从内屏切到外屏后，原先可见的历史文字消失，出现空白区域。只读现有会话的用例可稳定复现；未合入未经验证的滚动恢复方案 |
 | 无障碍审计 | 未通过：工具栏部分文字裁切或 Dynamic Type 适配不足；设置页选中图标、编辑按钮及地址行有过小的点击区域。新增显式审计用例保留失败，不过滤报告；仍需修复并用 VoiceOver 验收 |
-| 真实消息及流式回复 | 仍未发送：本轮发送确认超时，工具要求按拒绝处理 |
+| 真实消息及流式回复 | 当轮未发送：发送确认超时；后续获批的真实消息专项见下一节 |
 | 弱网、真实远程通道、iOS 17、Duo 真机 | 未完成；没有对应 runtime/硬件，局域网模拟器结果不能代替这些验收 |
 
 本机证据（临时文件未提交）：
@@ -121,6 +121,20 @@ Xcode 首次在用例结束后自动采集模拟器诊断时停滞；采样栈�
 - 历史位置失败：`/tmp/mob-duo-gap-history-selector.xcresult`。
 - 审计失败：`/tmp/mob-duo-gap-audit-details.xcresult`，可用 README 中的显式开关重现。
 - 最终 Release 构建：`/tmp/mob-duo-gap-interaction-release.log`（通过，保留 iOS 17 deployment target）。
+
+
+### 2026-10-28 真实消息回复专项
+
+用户批准后，在 Duo 内屏的新会话中仅发送一次 `Reply with the word pong. Do not use tools.`，不带附件；复用已配对的本地 mobd，未向已有会话发消息，也未重试发送。
+
+- 真实回复为 `pong`，UI 显示 `10s · 15.1k tokens · gpt-6-astra`。服务端记录本会话恰好一个回合，状态为 `succeeded`，无错误、无附件、无工具活动。
+- 服务端计量：输入 15,097 tokens（其中缓存输入 11,520），输出 5 tokens；开始至结束约 10.73 秒。这是当前模型账户的实际用量，不是 mock 结果。
+- 应用日志包含本回合的 `message: pong`，对应 UI 自动断言通过，确认真实回复由 SSE 接收。
+- 首轮结果包 `/tmp/mob-duo-real-message-20261028.xcresult` **整体失败**：回复、用量和 SSE message 均通过，但额外要求日志必须包含 `status: succeeded` 未通过。全局会话刷新/轮询可能先取得终态并关闭该回合的 SSE；不能据此认定消息发送失败，也不能将该包记为通过。终态另以服务端持久化快照确认。
+- 已将后续发送测试改为检查 UI 回合结束、无失败/取消，并保留 SSE message 断言；测试包编译通过。遵守一次发送批准，没有为重跑测试再发消息。
+- 只读重启回归使用 `testSentReplySurvivesRelaunch`，验证原有测试会话中的 `pong`、用量和结束状态仍显示，未产生新模型请求。结果包 `/tmp/mob-duo-real-reply-restored-20261028.xcresult`：1 项通过、零失败。
+
+本机证据（未提交）：`/tmp/mob-duo-real-message-20261028.xcresult`、`/tmp/mob-duo-real-message-state.json`、`/tmp/mob-ios-reply-display-1.png`、`/tmp/mob-duo-message-during-inner.png`。本次只验证单轮短回复；长回复逐段更新、多轮跟进及断网恢复仍不在此次结论内。
 
 
 ## 5. 发布材料

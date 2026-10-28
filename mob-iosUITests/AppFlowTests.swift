@@ -35,10 +35,38 @@ final class AppFlowTests: XCTestCase {
         XCTAssertTrue(field.waitForExistence(timeout: 10))
         field.tap()
         field.typeText("Reply with the word pong. Do not use tools.")
+        XCTAssertEqual(field.value as? String, "Reply with the word pong. Do not use tools.", "The test must not send a pre-existing draft")
+        XCTAssertEqual(app.buttons.matching(identifier: "Remove image").count, 0, "The test must not send attachments")
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in self.app.buttons["Send"].isEnabled }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 15), .completed)
         app.buttons["Send"].tap()
         XCTAssertTrue(app.staticTexts["pong"].waitForExistence(timeout: 120), "no reply")
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'tokens'")).firstMatch.waitForExistence(timeout: 20))
+        let ended = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !self.app.buttons["Stop"].exists }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [ended], timeout: 20), .completed)
+        XCTAssertFalse(app.staticTexts["Turn failed"].exists)
+        XCTAssertFalse(app.staticTexts["Cancelled"].exists)
         shot("reply")
+        app.buttons["Settings"].firstMatch.tap()
+        app.swipeUp()
+        app.buttons["Log"].tap()
+        // A rendered reply alone could have arrived by polling; require the real turn's SSE events.
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS ' message: pong'")).firstMatch.waitForExistence(timeout: 10))
+        shot("reply-stream-log")
+        app.buttons["Chat"].firstMatch.tap()
+    }
+
+    func testSentReplySurvivesRelaunch() throws {
+        guard ProcessInfo.processInfo.environment["MOBD_VERIFY_TEST_REPLY"] == "1" else {
+            throw XCTSkip("Open the approved pong test conversation before this read-only check")
+        }
+        XCTAssertTrue(app.staticTexts["Reply with the word pong. Do not use tools."].firstMatch.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["pong"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'tokens'")).firstMatch.exists)
+        XCTAssertFalse(app.buttons["Stop"].exists)
+        XCTAssertFalse(app.staticTexts["Turn failed"].exists)
+        XCTAssertFalse(app.staticTexts["Cancelled"].exists)
+        shot("reply-restored")
     }
 
     func testChatListAndSettings() {
