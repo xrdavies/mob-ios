@@ -29,18 +29,18 @@ A thumbnail under the title (hidden by default, toggled from the top bar; view-o
 
 - **WebRTC**: `POST /stream` with a non-trickle offer; receive-only H.264 shown by `RTCMTLVideoView`; input on the `input` / `pointer` / `control` data channels, with points normalized to the desktop inside the letterbox. Protocol: [mobd desktop streaming](https://github.com/xrdavies/mobd/blob/main/docs/desktop-streaming.md).
 - **WebSocket fallback**: if WebRTC has not connected after 5 s (or fails sooner), the same session continues on `/stream/ws` with the Bearer header, decoded by VideoToolbox. Used where UDP cannot pass (Tailscale Funnel, HTTPS gateways). A machine that needed it remembers that (`liveWebSocket`): next time WebRTC gets 1 s, then the WebSocket races beside it and the first frame wins.
-- **Quality** Auto / High / Low per machine, from the view or Settings; applies at once (an open view reconnects). View size changes are sent as `resize` without reconnecting. A readout shows size, fps, kB/s, transport and network (LAN, Tailscale, Internet, relay) with signal bars.
+- **Quality** Auto / High / Low per machine, from the view or Settings; applies at once (an open view reconnects). The actual canvas size and display scale size the stream; changes are sent as `resize` without reconnecting when mobd advertises `streamResize`. The full-screen canvas takes priority over the thumbnail; layout transitions are coalesced over 150 ms, and hidden canvases cannot restart the stream. A readout shows size, fps, kB/s, transport and network (LAN, Tailscale, Internet, relay) with signal bars.
 - **Snapshots**: when the live view is off, `/screen` at the view width × screen scale, quality 65, with `If-None-Match` so an unchanged screen costs a 304; mobd's reason is shown when the screen is unavailable (asleep, no Screen Recording).
 - mobd without the `stream` feature shows "Update mobd".
 
 Not yet checked: a real phone by hand (clicks, typing, gestures), a throttled link, the real Funnel path and a phone off Wi-Fi, and the TestFlight check for camera/microphone purpose-string warnings from the WebRTC binary.
 
-iPhone Duo support is not yet verified; see the [adaptation tasks](docs/iphone-duo.md).
+iPhone Duo simulator checks and remaining acceptance gaps are recorded in the [adaptation tasks](docs/iphone-duo.md). Real-device acceptance remains open.
 
 ## Setup
 
 1. Clone: `git clone git@github.com:xrdavies/mob-ios.git`
-2. Open `mob-ios.xcodeproj` in Xcode, pick a simulator or device, Run
+2. Open `mob-ios.xcodeproj` in Xcode, pick a simulator or device, Run (Duo simulator tested with Xcode 27.1 / iOS 27.1; the app still targets iOS 17)
 3. On the office computer run `mobd link`; in the app, Settings → Add machine, scan the QR code or paste the link, then Pair
 
 From the command line:
@@ -49,7 +49,31 @@ From the command line:
 xcodebuild -project mob-ios.xcodeproj -scheme mob-ios -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
 ```
 
-`LiveStreamTests` open a real live view and are skipped unless `MOBD_URL` and `MOBD_TOKEN` (a paired device credential) are set; they only move the office pointer. The UI tests (`mob-iosUITests`) drive the app against a real mobd and expect a paired machine in the simulator; they create and send in a new chat.
+`LiveStreamTests` require a real mobd. Set `TEST_RUNNER_MOBD_USE_PAIRED_MACHINE=1` to reuse the simulator's active paired machine and its Keychain credential, or supply `TEST_RUNNER_MOBD_URL` / `TEST_RUNNER_MOBD_TOKEN`. Four cases check WebRTC, blocked-UDP WebSocket fallback, remembered fallback and return to WebRTC, including continued frames, pointer movement and resize.
+
+The two control cases additionally require `TEST_RUNNER_MOBD_INPUT_PROBE_PATH=/tmp/mob-ios-input-probe.json`. On the Mac running both mobd and the simulator, unlock the desktop and run this isolated input window first:
+
+```bash
+swiftc scripts/input-probe.swift -o /tmp/mob-ios-input-probe
+/tmp/mob-ios-input-probe
+```
+
+It covers the desktop and records test clicks, drag, text, arrow keys and scroll; Esc closes it. Tests check release on the background notification and suppression of input in View mode. They refuse a locked, inactive, stale or different-host probe. The window redraws a heartbeat so an unchanged desktop does not stall the frame assertions. Run `-only-testing:mob-iosTests/LiveStreamTests` with the environment above; omit the probe variable to skip control cases.
+
+UI tests expect a paired machine. `testDraftSurvivesRotationAndBackground` verifies an unsent draft after rotation and a confirmed switch to Settings. `testLiveViewResizeAndControlRelease` checks decoded video, actual UI resize messages and return to View after backgrounding. `testSendAndStreamReply` sends one new-chat message only with `TEST_RUNNER_MOBD_SEND_TEST_MESSAGE=1`; approve the real model request before enabling it. It checks the exact outgoing text, zero attachments, the displayed reply and usage, completion, and a received SSE message event. `testSentReplySurvivesRelaunch` is read-only: open that test conversation, then set `TEST_RUNNER_MOBD_VERIFY_TEST_REPLY=1` to check the reply and usage after restarting the app without sending again.
+
+`testDraftAcrossDisplayChanges` is an operator-assisted test: set `TEST_RUNNER_MOBD_DISPLAY_CHANGES` to the number of transitions, then fold/unfold or resize in Device Hub at each `display-transition[n]` checkpoint. It waits for an actual window-size change and checks that the draft and Send button survive. It fails if no transition happens; it is skipped by default. UI screenshots include every screen reported by XCTest (including the Duo inner screen); use `simctl io … screenshot --display=primary-1` to verify the inner screen if XCTest returns black images.
+
+`testLiveTouchCoordinatesAndZoom` uses the same local probe to check the actual full-screen UI: View suppresses input, pinch/pan/double-tap affect coordinates, letterbox taps are ignored, and rotation, right-click, drag and keyboard input reach the probe. Keep the probe in the foreground during these cases.
+
+Optional UI checks (all disabled unless explicitly configured):
+
+- Set `TEST_RUNNER_MOBD_TEST_PHOTO_LABEL` to the exact accessibility label of a synthetic photo imported with `simctl addmedia`. Draft tests select only that photo, upload it to local mobd, and verify the attachment count after transitions; they never send it to a model. The label is the picker date/time, not the filename.
+- Set `TEST_RUNNER_MOBD_SPLIT_VIEW=1` on the Duo's open inner display for `testDraftAcrossSplitView`. It drags the app into both split sides and checks the draft and any seeded attachment.
+- Set `TEST_RUNNER_MOBD_HISTORY_CHAT_TITLE` and `TEST_RUNNER_MOBD_DISPLAY_CHANGES` for `testHistoryAcrossDisplayChanges`. Choose an existing conversation with enough history; it only reads it and checks that the visible text survives each operator-assisted display transition.
+- Set `TEST_RUNNER_MOBD_ACCESSIBILITY_AUDIT=1` for `testAccessibilityAudit`. This intentionally reports all issues without suppressions; current failures are recorded in the Duo task document.
+
+`LayoutTests.testSettingsAndPairingAcrossRotation` needs no paired machine; repeat it with Device Hub's inner and outer screens. `testPairMachineFromLink` adds a paired device only when `TEST_RUNNER_MOBD_PAIR_LINK` contains a fresh, single-use `mobd link` invitation. Neither layout test sends a chat message. On this Xcode/runtime combination, add `-collect-test-diagnostics never` if automatic simulator diagnostics stall after tests finish; normal result bundles and attachments are still generated.
 
 ## Releases
 
