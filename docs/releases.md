@@ -32,7 +32,7 @@ TestFlight 内部验证 → 提交 App Store 审核 → 发布。CI 自动化见
 | 隐私清单 | UserDefaults（`CA92.1`），无跟踪、不收集数据 | `PrivacyInfo.xcprivacy` |
 | 出口合规 | `ITSAppUsesNonExemptEncryption = NO` | `Info.plist` |
 
-官网（`../mob-site`，https://mob.0xd.app ）：仓库变量 `IOS_APP_URL`（只接受 `apps.apple.com` 或
+官网（`../mob-site`，https://mymob.dev ）：仓库变量 `IOS_APP_URL`（只接受 `apps.apple.com` 或
 `testflight.apple.com`）设置后，下载页 iPhone 卡片显示 “Get it on the App Store”（TestFlight 链接显示
 “Join on TestFlight”）；未设置时显示 “Coming to the App Store”。设置后重新运行官网的 Pages 工作流。
 
@@ -75,7 +75,7 @@ App Store Connect → 我的 App → 新建 App：
 之后补齐：
 
 - **App 信息**：类别「效率」或「开发者工具」；内容版权；年龄分级问卷。
-- **App 隐私**：隐私政策 URL `https://mob.0xd.app/privacy/`（必填）；隐私标签见第二节。
+- **App 隐私**：隐私政策 URL `https://mymob.dev/privacy/`（必填）；隐私标签见第二节。
 - **价格与销售范围**：免费；销售地区。中国大陆上架需要 ICP 备案号（视地区决定）。
 - **TestFlight**：内部测试组（App Store Connect 用户，最多 100 人，无需审核）；
   需要外部测试时建外部组（首个构建需 Beta 审核，可生成公开链接 `testflight.apple.com/join/…`）。
@@ -129,7 +129,7 @@ Apple 的「收集」指开发者或第三方获取数据；数据只到用户�
 - **审核需要看到应用工作**（准则 2.1）。没有配对的电脑应用无法演示。**采用演示视频**：录制完整流程
   （在电脑上 `mobd link` → 手机扫码配对 → 发任务 → 回答问题 → 实时桌面与控制），上传到可公开访问的
   地址，在「App 审核信息 → 备注」中给出链接，并说明 mobd 是用户在自己电脑上运行的服务端
-  （https://mob.0xd.app/start/ ）。审核员仍要求实机时，再准备可从公网访问的演示 mobd。
+  （https://mymob.dev/start/ ）。审核员仍要求实机时，再准备可从公网访问的演示 mobd。
 - **ATS 例外**：`NSAllowsArbitraryLoads` 用于连接用户局域网里的 mobd（HTTP），在审核备注中说明。
 - 远程控制桌面：在说明中写明只控制用户自己的电脑，需在电脑端用 `mobd link` 配对授权。
 
@@ -138,7 +138,7 @@ Apple 的「收集」指开发者或第三方获取数据；数据只到用户�
 - 截图：iPhone 6.9″（1320×2868）必需；因支持 iPad，iPad 13″（2064×2752）也必需。界面和演示对话用
   英文，不含个人数据；首次上架前需重新拍摄（现有截图为中文演示对话）。
 - 图标 1024×1024 已在 `Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png`（需无透明通道）。
-- 副标题、描述、关键词（英文）；支持 URL `https://mob.0xd.app/start/`（联系邮箱 mob@taoist.dev）；营销 URL `https://mob.0xd.app/`。
+- 副标题、描述、关键词（英文）；支持 URL `https://mymob.dev/start/`（联系邮箱 mob@taoist.dev）；营销 URL `https://mymob.dev/`。
 
 ## 三、每次发布（手动）
 
