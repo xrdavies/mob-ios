@@ -107,7 +107,7 @@ Apple 的「收集」指开发者或第三方获取数据；数据只到用户�
 | 键 | 当前文字 | 状态 |
 | --- | --- | --- |
 | `NSCameraUsageDescription` | Scan the pairing QR code shown by mobd link. | 【现有】 |
-| `NSLocalNetworkUsageDescription` | mob connects to mobd on your office Mac over your local network. | 【现有】；待改为 “Mob connects …” |
+| `NSLocalNetworkUsageDescription` | Mob connects to mobd on your office computer over your local network. | 【现有】 |
 | `NSMicrophoneUsageDescription` | Mob does not record audio; the live desktop's WebRTC library declares microphone access. | 【现有】 |
 | 照片 | 无需；`PhotosPicker` 不要求权限 | — |
 

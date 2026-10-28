@@ -1,18 +1,18 @@
 # mob-ios
 
-Native iOS app (Swift, SwiftUI) for [mob](https://github.com/xrdavies/mob): dispatch AI agent tasks to your office Mac and monitor the desktop from your iPhone or iPad.
+Native iOS app (Swift, SwiftUI) for [mob](https://github.com/xrdavies/mob): dispatch AI agent tasks to your office computer and monitor the desktop from your iPhone or iPad.
 
 ## Requirements
 
 - iOS 17.0+
 - Xcode 26 (the project uses Xcode 16+ synchronized folders: new files in `mob-ios/` need no project edits)
-- Office Mac running [mobd](https://github.com/xrdavies/mobd) (API v3) with the `stream` feature
+- An office computer (macOS or Linux) running [mobd](https://github.com/xrdavies/mobd) (API v3) with the `stream` feature
 
 ## Features
 
 Same as [mob-android](https://github.com/xrdavies/mob-android):
 
-- **Several office Macs**: add, edit and switch machines (Settings, or the switcher in the chat list); each has its own chats, pairing and live view quality
+- **Several office computers**: add, edit and switch machines (Settings, or the switcher in the chat list); each has its own chats, pairing and live view quality
 - **Pairing**: scan or paste the link from `mobd link`; the device credential is kept in the Keychain and sent as `Authorization: Bearer`. When mobd no longer accepts it (revoked, auth reset) the machine shows **Pair again**
 - **Chats**: chat list with New chat, Pinned / Recent / Archived; swipe or long-press to rename, pin, archive or delete
 - **Composer**: up to 10 photos (uploaded as JPEG), agent for a new chat, model and reasoning effort (remembered per machine and agent), **Stop**, adding a message to a running Codex turn (steer), queue position while waiting for the desktop
@@ -41,7 +41,7 @@ iPhone Duo support is not yet verified; see the [adaptation tasks](docs/iphone-d
 
 1. Clone: `git clone git@github.com:xrdavies/mob-ios.git`
 2. Open `mob-ios.xcodeproj` in Xcode, pick a simulator or device, Run
-3. On the office Mac run `mobd link --url <address the phone can reach>`; in the app, Settings → Add machine, scan the QR code or paste the link, then Pair
+3. On the office computer run `mobd link`; in the app, Settings → Add machine, scan the QR code or paste the link, then Pair
 
 From the command line:
 
