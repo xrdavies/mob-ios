@@ -178,14 +178,17 @@ Apple 的「收集」指开发者或第三方获取数据；数据只到用户�
 ### 3. 提交版本并打标签
 
 ```bash
-make release VERSION=v0.1.0
+make version          # 当前版本（MARKETING_VERSION）、上一个发布标签和之后的提交
+make release-patch    # 0.1.0 → 0.1.1；新功能用 release-minor，不兼容的改动用 release-major
+make release VERSION=v0.3.1   # 跳号或首次发布时指定版本
 ```
 
-`.github/release/tag.mjs` 先检查：在 `main` 上、工作区干净、与 `origin/main` 一致、版本高于已有
-标签。然后把 `MARKETING_VERSION` 和 `CURRENT_PROJECT_VERSION` 写进 `project.pbxproj`，提交
+版本号以 `MARKETING_VERSION` 为准，标签只是它的镜像。`.github/release/tag.mjs` 先检查：在 `main` 上、
+工作区干净、与 `origin/main` 一致、版本高于已有标签、提交未发布过；显示「当前 → 新版本」和之后的提交并
+询问 `[y/N]`。确认后把 `MARKETING_VERSION` 和 `CURRENT_PROJECT_VERSION` 写进 `project.pbxproj`，提交
 `chore(release): v0.1.0`，在该提交上打附注标签，并用 `git push --atomic` 同时推送 `main` 和标签。
 推送被拒时两者都不会到达 GitHub，本地提交和标签保留，按提示重试；若远端 `main` 已有新提交，
-`git tag -d vX.Y.Z && git reset --hard origin/main` 后重新运行 `make release`。
+`git tag -d vX.Y.Z && git reset --hard origin/main` 后重新运行。`make archive` 也会确认标签与工程中的 `MARKETING_VERSION` 一致。
 
 ### 4. Archive 并上传
 
@@ -241,7 +244,7 @@ App Store Connect → Upload（同样使用工程中的版本号）。
 ## 五、发布清单（每次）
 
 - [ ] `main` 已推送，单元测试通过，真机手测通过。
-- [ ] `make release VERSION=vX.Y.Z`：版本提交和标签已推送。
+- [ ] `make release-patch`（或 `-minor`、`-major`、`VERSION=vX.Y.Z`）：版本提交和标签已推送。
 - [ ] `make archive TEAM=…` 上传成功；处理 ITMS 警告邮件。
 - [ ] TestFlight 内部测试通过（iPhone + iPad）。
 - [ ] 新版本页：构建、更新说明、截图、审核备注。
