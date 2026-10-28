@@ -68,13 +68,7 @@ final class AppState: MachineEvents {
     init() {
         let data = UserDefaults.standard.data(forKey: "machines")
         var stored = data.flatMap { try? JSONDecoder().decode([Machine].self, from: $0) } ?? []
-        // VNC is gone: older versions kept a Desktop sign-in password, in this JSON or the Keychain.
-        // Rewriting the JSON drops it there; the Keychain copies are deleted once.
-        var changed = data.map { String(decoding: $0, as: UTF8.self).contains("\"vnc") } ?? false
-        if !UserDefaults.standard.bool(forKey: "vncRemoved") {
-            for m in stored { Keychain.delete("\(m.id).vncPassword") }
-            UserDefaults.standard.set(true, forKey: "vncRemoved")
-        }
+        var changed = false
         // Machines from before pairing, or whose token is gone, need pairing.
         for i in stored.indices {
             for j in stored[i].addresses.indices where !stored[i].addresses[j].needsPairing && stored[i].addresses[j].token == nil {

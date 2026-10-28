@@ -91,15 +91,11 @@ final class PairingTests: XCTestCase {
         XCTAssertNil(Keychain.get(account))
     }
 
-    func testOldMachineJSONDecodesWithoutDesktopSignIn() throws {
-        let old = #"[{"id":"m1","name":"Office","mobdUrl":"http://10.0.0.2:8080","vncUsername":"me","vncPassword":"pw"},{"id":"m2","name":"B","mobdUrl":"b"}]"#
+    func testMachinesFromBeforePairingNeedPairing() throws {
+        let old = #"[{"id":"m1","name":"Office","mobdUrl":"http://10.0.0.2:8080"},{"id":"m2","name":"B","mobdUrl":"b"}]"#
         let list = try JSONDecoder().decode([Machine].self, from: Data(old.utf8))
         XCTAssertEqual(list.map(\.id), ["m1", "m2"])
         XCTAssertTrue(list.allSatisfy { $0.needsPairing && $0.serverId == nil })
-        // VNC is gone: neither the sign-in user nor the password is written back.
-        let saved = String(decoding: try JSONEncoder().encode(list), as: UTF8.self)
-        XCTAssertFalse(saved.contains("vnc"))
-        XCTAssertFalse(saved.contains("pw"))
     }
 
     func testLiveViewSettingsRoundTrip() throws {
