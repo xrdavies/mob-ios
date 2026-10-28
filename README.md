@@ -1,6 +1,6 @@
 # mob-ios
 
-Native iOS app (Swift, SwiftUI) for [mob](https://github.com/xrdavies/mob): dispatch AI agent tasks to your office computer and monitor the desktop from your iPhone or iPad.
+Mob for iPhone and iPad (Swift, SwiftUI). **Mob** is mob programming with your AI agents: they work on your office computer (via [mobd](https://github.com/xrdavies/mobd)), you steer from your iPhone or iPad: send tasks, answer their questions, watch and control the live desktop. The name comes from [mob programming](https://en.wikipedia.org/wiki/Mob_programming), where a team works on one computer together: one at the keyboard, the others steering. In Mob the team is you and your agents.
 
 ## Requirements
 
