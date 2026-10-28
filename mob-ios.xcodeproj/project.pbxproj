@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A100000000000000000000B2 /* TUSKit in Frameworks */ = {isa = PBXBuildFile; productRef = A100000000000000000000B1 /* TUSKit */; };
 		A100000000000000000000A2 /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = A100000000000000000000A1 /* WebRTC */; };
 /* End PBXBuildFile section */
 
@@ -70,6 +71,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A100000000000000000000A2 /* WebRTC in Frameworks */,
+				A100000000000000000000B2 /* TUSKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -131,6 +133,7 @@
 			name = "mob-ios";
 			packageProductDependencies = (
 				A100000000000000000000A1 /* WebRTC */,
+				A100000000000000000000B1 /* TUSKit */,
 			);
 			productName = "mob-ios";
 			productReference = A10000000000000000000011 /* mob-ios.app */;
@@ -212,6 +215,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				A100000000000000000000A0 /* XCRemoteSwiftPackageReference "WebRTC" */,
+				A100000000000000000000B0 /* XCRemoteSwiftPackageReference "TUSKit" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A10000000000000000000003 /* Products */;
@@ -488,6 +492,11 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+        A100000000000000000000B0 /* XCRemoteSwiftPackageReference "TUSKit" */ = {
+            isa = XCRemoteSwiftPackageReference;
+            repositoryURL = "https://github.com/tus/TUSKit.git";
+            requirement = { kind = exactVersion; version = 3.7.1; };
+        };
 		A100000000000000000000A0 /* XCRemoteSwiftPackageReference "WebRTC" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/stasel/WebRTC.git";
@@ -499,6 +508,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+        A100000000000000000000B1 /* TUSKit */ = {
+            isa = XCSwiftPackageProductDependency;
+            package = A100000000000000000000B0 /* XCRemoteSwiftPackageReference "TUSKit" */;
+            productName = TUSKit;
+        };
 		A100000000000000000000A1 /* WebRTC */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = A100000000000000000000A0 /* XCRemoteSwiftPackageReference "WebRTC" */;

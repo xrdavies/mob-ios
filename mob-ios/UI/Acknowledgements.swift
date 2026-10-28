@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// Licences of mob-ios and of the code it ships. WebRTC (stasel/WebRTC, a build of Google's libwebrtc) is
-/// the only third-party package; the components it bundles were read from the shipped binary.
+/// Licences of mob-ios and its shipped libraries, including components bundled in WebRTC.
 enum Acknowledgements {
     struct Item: Identifiable {
         let name: String
@@ -15,6 +14,30 @@ enum Acknowledgements {
 MIT License
 
 Copyright (c) 2026 Frozen and MOB contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+""")
+
+    static let tus = Item(name: "TUSKit", license: "MIT", url: "https://github.com/tus/TUSKit", text: """
+The MIT License (MIT)
+
+Copyright (c) 2015 tus - Resumable File Uploads
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -86,6 +109,7 @@ struct AcknowledgementsView: View {
     var body: some View {
         List {
             Section { licenseRow(Acknowledgements.mob) }
+            Section("File transfers") { licenseRow(Acknowledgements.tus) }
             Section {
                 licenseRow(Acknowledgements.webrtc)
             } header: {

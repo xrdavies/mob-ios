@@ -12,6 +12,7 @@ Mob for iPhone and iPad (Swift, SwiftUI). **Mob** is mob programming with your A
 
 Same as [mob-android](https://github.com/xrdavies/mob-android):
 
+- **Files**: upload local files and download from the machine’s shared directory, with pause/continue, persistent partial transfers and SHA-256 verification. Choose local files and save locations with the system picker. [Transfer details](docs/file-transfers.md).
 - **Several office computers**: add, edit and switch machines (Settings, or the switcher in the chat list); each has its own chats, pairing and live view quality
 - **Pairing**: scan or paste the link from `mobd link`; the device credential is kept in the Keychain and sent as `Authorization: Bearer`. When mobd no longer accepts it (revoked, auth reset) the machine shows **Pair again**
 - **Chats**: chat list with New chat, Pinned / Recent / Archived; swipe or long-press to rename, pin, archive or delete

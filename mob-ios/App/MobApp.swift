@@ -23,7 +23,9 @@ struct MobApp: App {
         }
         .onChange(of: phase) { _, now in
             appState.foreground = now == .active
+            appState.files.foreground = now == .active
             if now == .background {
+                appState.files.pauseAll()
                 MobApp.scheduleRefresh()
                 Task { await appState.rememberSessions() }
             }
@@ -63,6 +65,9 @@ struct RootView: View {
             })
             .tabItem { Label("Tasks", systemImage: "list.bullet") }
             .tag(1)
+            FilesView()
+                .tabItem { Label("Files", systemImage: "folder") }
+                .tag(3)
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(2)
