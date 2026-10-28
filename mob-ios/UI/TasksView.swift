@@ -11,7 +11,7 @@ struct TasksView: View {
         NavigationStack {
             Group {
                 if app.activeMachine == nil {
-                    message("Add your office Mac in Settings")
+                    message("Add your office computer in Settings")
                 } else if app.activeMachine?.needsPairing == true {
                     message("This device needs to be paired again\nSettings → Machines → Pair again")
                 } else if let tasks {

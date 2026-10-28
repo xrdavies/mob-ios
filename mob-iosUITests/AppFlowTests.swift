@@ -32,7 +32,7 @@ final class AppFlowTests: XCTestCase {
         XCTAssertTrue(newChat.waitForExistence(timeout: 15))
         newChat.tap()
         // Never send into an existing chat: the empty new-chat screen must be showing.
-        XCTAssertTrue(app.staticTexts["New chat on Office Mac"].waitForExistence(timeout: 5), "new chat did not open")
+        XCTAssertTrue(app.staticTexts["New chat on Office computer"].waitForExistence(timeout: 5), "new chat did not open")
         let field = app.textFields.firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 10))
         field.tap()

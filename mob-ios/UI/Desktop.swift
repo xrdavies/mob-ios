@@ -245,7 +245,7 @@ struct LiveView: View {
     @Environment(AppState.self) private var app
     @State private var scale: CGFloat = 1
     @State private var offset: CGSize = .zero
-    /// Where the last touch reached the Mac, in desktop pixels.
+    /// Where the last touch reached the office computer, in desktop pixels.
     @State private var mark: (x: Int, y: Int)?
     @State private var typing = false
 
@@ -307,12 +307,12 @@ struct LiveView: View {
 
     private func footer(_ s: LiveState, live: Bool) -> String {
         if s.control { return "Tap = click · long-press = right-click · drag · two fingers: scroll or pinch to zoom" }
-        if live { return "View only · pinch to zoom · switch to Control to use the Mac" }
+        if live { return "View only · pinch to zoom · switch to Control to use the office computer" }
         if s.status == .connecting { return "View only · connecting the live view…" }
         return "View only snapshot · " + (s.detail.isEmpty ? "live view not connected" : s.detail)
     }
 
-    /// A ring where the last touch reached the Mac (the Mac draws its own pointer).
+    /// A ring where the last touch reached the office computer (it draws its own pointer).
     private func marker(_ at: (x: Int, y: Int), in size: CGSize, fw: Int, fh: Int) -> some View {
         let s = min(size.width / CGFloat(max(fw, 1)), size.height / CGFloat(max(fh, 1)))
         let lx = (size.width - CGFloat(fw) * s) / 2 + CGFloat(at.x) * s
@@ -475,7 +475,7 @@ private struct TouchSurface: UIViewRepresentable {
         }
 
         @objc private func doubleTap(_ g: UITapGestureRecognizer) {
-            // In Control mode two taps already went to the Mac as a double-click.
+            // In Control mode two taps already went to the office computer as a double-click.
             if !control, g.state == .ended { handler?.reset() }
         }
 
@@ -530,7 +530,7 @@ private struct TouchSurface: UIViewRepresentable {
     }
 }
 
-/// Receives the phone keyboard while active and types it on the Mac.
+/// Receives the phone keyboard while active and types it on the office computer.
 private struct KeyboardSink: UIViewRepresentable {
     let active: Bool
     let session: StreamSession

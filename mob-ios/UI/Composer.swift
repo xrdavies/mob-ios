@@ -139,7 +139,7 @@ struct Composer: View {
     private func placeholder(canSteer: Bool, busy: Bool) -> String {
         if canSteer { return "Add to what the agent is doing…" }
         if busy { return "The agent is working… you can draft the next message" }
-        return "Ask Mob to do something on \(app.activeMachine?.name ?? "the office Mac")…"
+        return "Ask Mob to do something on \(app.activeMachine?.name ?? "the office computer")…"
     }
 
     private func send(canSteer: Bool, busy: Bool, uploading: Bool, runner: String?, model: String?, effort: String?,

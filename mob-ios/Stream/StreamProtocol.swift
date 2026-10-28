@@ -50,7 +50,7 @@ enum ControlMessage: Equatable {
         case "stats":
             return .stats(kbps: Int(num("kbps")), width: Int(num("width")), height: Int(num("height")), fps: Int(num("fps")),
                           loss: num("loss"), rttMs: Int(num("rttMs")))
-        case "ended": return .ended(str("message").isEmpty ? "The office Mac ended the live view" : str("message"))
+        case "ended": return .ended(str("message").isEmpty ? "The office computer ended the live view" : str("message"))
         case "error": return .error(about: str("about"), message: str("message"))
         case "cursor": return .cursor(x: num("x"), y: num("y"))
         default: return nil
@@ -125,7 +125,7 @@ func webKeyCode(for c: Character) -> String? {
 
 private let modifierCodes: Set<String> = ["ShiftLeft", "ShiftRight", "ControlLeft", "ControlRight", "AltLeft", "AltRight", "MetaLeft", "MetaRight", "CapsLock", "Fn"]
 
-/// Keys and buttons held on the office Mac, so they can all be released when control ends or the
+/// Keys and buttons held on the office computer, so they can all be released when control ends or the
 /// app goes to the background (a dropped touch never sends its button-up).
 struct HeldInput {
     private(set) var keys: [String] = []

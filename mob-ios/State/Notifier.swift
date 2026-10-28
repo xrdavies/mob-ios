@@ -62,7 +62,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// Registers the answer buttons for a question and returns its category ID.
     private func register(_ q: Question) -> String {
         let id = "ask.\(q.id)"
-        // Answers act on the office Mac, so they need an unlocked phone.
+        // Answers act on the office computer, so they need an unlocked phone.
         let auth: UNNotificationActionOptions = [.authenticationRequired]
         var actions: [UNNotificationAction] = []
         if q.isApproval {
@@ -88,7 +88,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         return id
     }
 
-    /// Tells the user an answer from a notification did not reach the Mac.
+    /// Tells the user an answer from a notification did not reach the office computer.
     private func failed(_ info: [AnyHashable: Any], _ message: String) {
         guard let m = info["machine"] as? String, let s = info["session"] as? String else { return }
         Log.add("notification answer failed: \(message)")

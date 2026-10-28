@@ -36,7 +36,7 @@
 	<key>NSCameraUsageDescription</key>
 	<string>Scan the pairing QR code shown by mobd link.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>mob connects to mobd on your office Mac over your local network.</string>
+	<string>Mob connects to mobd on your office computer over your local network.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Mob does not record audio; the live desktop's WebRTC library declares microphone access.</string>
 	<key>UIApplicationSceneManifest</key>

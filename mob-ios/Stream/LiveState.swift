@@ -8,6 +8,6 @@ struct LiveState: Equatable {
     var detail = ""
     var width = 0
     var height = 0
-    /// Touches and keys reach the office Mac only while true (full-screen Control mode).
+    /// Touches and keys reach the office computer only while true (full-screen Control mode).
     var control = false
 }

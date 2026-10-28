@@ -17,7 +17,7 @@ struct SettingsView: View {
                 if app.activeMachine != nil { status }
                 Section("Machines") {
                     if app.machines.isEmpty {
-                        Text("No office Mac yet. Run mobd link on the Mac that runs the agent, then add it with the link or QR code.").foregroundStyle(.secondary)
+                        Text("No office computer yet. Run mobd link on the computer that runs the agent, then add it with the link or QR code.").foregroundStyle(.secondary)
                     }
                     ForEach(app.machines) { m in
                         // The row selects the machine; the route line has its own "Use …" button.
@@ -63,7 +63,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Notifications")
                 } footer: {
-                    Text("Mob notifies you when the agent asks something or a task finishes, on every office Mac in the list. While Mob is open this is immediate. In the background iOS does not allow a live connection, so Mob checks when iOS lets it refresh, usually every 15 minutes or more.")
+                    Text("Mob notifies you when the agent asks something or a task finishes, on every office computer in the list. While Mob is open this is immediate. In the background iOS does not allow a live connection, so Mob checks when iOS lets it refresh, usually every 15 minutes or more.")
                 }
                 Section {
                     NavigationLink("Log") { LogView() }
@@ -86,7 +86,7 @@ struct SettingsView: View {
             .confirmationDialog("Remove \(deleting?.name ?? "")?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), titleVisibility: .visible) {
                 Button("Remove", role: .destructive) { if let m = deleting { app.delete(m) } }
             } message: {
-                Text("Only removes it from this phone. Chats stay on the office Mac.")
+                Text("Only removes it from this phone. Chats stay on the office computer.")
             }
             .task(id: phase) { notificationsAllowed = await app.notifier.allowed() }
         }
@@ -101,7 +101,7 @@ struct SettingsView: View {
             }
             if let e = app.healthError { Text(e).font(.caption).foregroundStyle(.red) }
             if let m = app.activeMachine, m.needsPairing {
-                Text("mobd on \(m.name) does not accept this device. Run mobd link on the office Mac and pair again.")
+                Text("mobd on \(m.name) does not accept this device. Run mobd link on the office computer and pair again.")
                     .font(.caption).foregroundStyle(.secondary)
                 Button("Pair again") { pairing = PairRequest(machine: m) }
             }
@@ -110,7 +110,7 @@ struct SettingsView: View {
                 LabeledContent("Runners", value: runners.isEmpty ? (h.runner ?? "—") : runners)
                 if !h.problems.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Needs attention on the office Mac").font(.subheadline.weight(.semibold)).foregroundStyle(Color.waiting)
+                        Text("Needs attention on the office computer").font(.subheadline.weight(.semibold)).foregroundStyle(Color.waiting)
                         ForEach(h.problems, id: \.label) { p in
                             Label {
                                 VStack(alignment: .leading) {
@@ -179,7 +179,7 @@ private struct MachineEditor: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Name (Office Mac)", text: $machine.name)
+                    TextField("Name (Office computer)", text: $machine.name)
                 }
                 Section {
                     ForEach(machine.addresses) { a in
@@ -214,7 +214,7 @@ private struct MachineEditor: View {
                 } header: {
                     Text("Addresses")
                 } footer: {
-                    Text("Each address is paired on its own, so the device credential never goes to an address it was not paired on. To add one, run mobd link (or mobd link --lan) on the office Mac and scan its code. Swipe or long-press an address to rename or remove it; long-press the machine in the list to choose which address Mob uses.")
+                    Text("Each address is paired on its own, so the device credential never goes to an address it was not paired on. To add one, run mobd link (or mobd link --lan) on the office computer and scan its code. Swipe or long-press an address to rename or remove it; long-press the machine in the list to choose which address Mob uses.")
                 }
                 Section {
                     NavigationLink { AgentSettingsScreen(machine: machine) } label: { Label("Agents", systemImage: "cpu") }
@@ -235,7 +235,7 @@ private struct MachineEditor: View {
                 Section {
                     Button("Remove machine", role: .destructive) { removing = true }
                 } footer: {
-                    Text("Only removes it from this phone. Chats stay on the office Mac.")
+                    Text("Only removes it from this phone. Chats stay on the office computer.")
                 }
             }
             .alert("Rename address", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
@@ -265,7 +265,7 @@ private struct MachineEditor: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         var m = machine
-                        m.name = m.name.trimmingCharacters(in: .whitespaces).isEmpty ? "Office Mac" : m.name.trimmingCharacters(in: .whitespaces)
+                        m.name = m.name.trimmingCharacters(in: .whitespaces).isEmpty ? "Office computer" : m.name.trimmingCharacters(in: .whitespaces)
                         onSave(m)
                         dismiss()
                     }
@@ -275,7 +275,7 @@ private struct MachineEditor: View {
     }
 }
 
-/// Pairs this device with an office Mac from the link or QR code printed by `mobd link`.
+/// Pairs this device with an office computer from the link or QR code printed by `mobd link`.
 struct PairingSheet: View {
     @Environment(AppState.self) private var app
     @Environment(\.dismiss) private var dismiss
@@ -325,7 +325,7 @@ struct PairingSheet: View {
                     Text("Pairing link")
                 } footer: {
                     if let linkError { Text(linkError).foregroundStyle(.red) } else {
-                        Text("On the office Mac run mobd link. It prints a QR code and a link; each works once.")
+                        Text("On the office computer run mobd link. It prints a QR code and a link; each works once.")
                     }
                 }
                 if let link { office(link) }
@@ -334,7 +334,7 @@ struct PairingSheet: View {
                 } header: {
                     Text("This device")
                 } footer: {
-                    Text("Shown on the office Mac in the list of paired devices.")
+                    Text("Shown on the office computer in the list of paired devices.")
                 }
                 Section {
                     Button {
@@ -348,7 +348,7 @@ struct PairingSheet: View {
                     .disabled(link == nil || busy || (otherOffice && !confirmed) || PairLink.validName(deviceName) == nil)
                     if let error { Text(error).font(.caption).foregroundStyle(.red) }
                 } footer: {
-                    Text("mobd link prints the same kind of link for every way of reaching the office Mac: its LAN, VPN or Tailscale address, or a self-hosted Tailscale Funnel HTTPS address. MOB relay — coming soon.")
+                    Text("mobd link prints the same kind of link for every way of reaching the office computer: its LAN, VPN or Tailscale address, or a self-hosted Tailscale Funnel HTTPS address. MOB relay — coming soon.")
                 }
             }
             .navigationTitle(existing == nil ? "Add machine" : "Pair \(existing?.name ?? "") again")
@@ -367,7 +367,7 @@ struct PairingSheet: View {
     }
 
     @ViewBuilder private func office(_ link: PairLink) -> some View {
-        Section("Office Mac") {
+        Section("Office computer") {
             LabeledContent("Address", value: link.origin)
             if link.isInsecure {
                 warning("Not encrypted: use only on a trusted network or a Tailscale/VPN address.")
@@ -383,7 +383,7 @@ struct PairingSheet: View {
                 Toggle("Use this address", isOn: $confirmed)
             }
             if target == nil {
-                TextField("Name (Office Mac)", text: $officeName)
+                TextField("Name (Office computer)", text: $officeName)
             }
         }
     }
@@ -418,7 +418,7 @@ struct PairingSheet: View {
             defer { busy = false }
             do {
                 let result = try await pair(link: link, name: deviceName)
-                try app.completePairing(link, result, existing: target, name: name.isEmpty ? "Office Mac" : name)
+                try app.completePairing(link, result, existing: target, name: name.isEmpty ? "Office computer" : name)
                 dismiss()
             } catch {
                 self.error = readable(error)

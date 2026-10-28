@@ -36,7 +36,7 @@ struct MobApp: App {
         try? BGTaskScheduler.shared.submit(request)
     }
 
-    /// iOS wakes the app now and then; check the Macs for questions and finished tasks.
+    /// iOS wakes the app now and then; check the machines for questions and finished tasks.
     private static func handleRefresh(_ task: BGAppRefreshTask) {
         scheduleRefresh()
         let work = Task { @MainActor in

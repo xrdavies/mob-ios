@@ -101,7 +101,7 @@ final class StreamSession {
         Task { [weak self] in
             try? await Task.sleep(for: Self.connectTimeout)
             guard let self, self.attempt == a, self.state.status == .connecting else { return }
-            self.fail(a, "The live view did not start. Is the office Mac reachable from here?")
+            self.fail(a, "The live view did not start. Is the office computer reachable from here?")
         }
     }
 
@@ -170,7 +170,7 @@ final class StreamSession {
             if error.isUnauthorized { onUnauthorized?(client) }
             if let msg = streamErrorText(error) { return fail(a, msg) }
             let status = (error as? APIError)?.status
-            fail(a, status == 404 || status == 405 ? "Update mobd on the office Mac to use the live desktop" : readable(error))
+            fail(a, status == 404 || status == 405 ? "Update mobd on the office computer to use the live desktop" : readable(error))
         }
     }
 
@@ -204,7 +204,7 @@ final class StreamSession {
                 self.player = nil
                 if !opened {
                     // Still racing: WebRTC may yet connect.
-                    if self.pc == nil { self.fail(a, "The office Mac could not be reached over WebRTC or the WebSocket fallback") }
+                    if self.pc == nil { self.fail(a, "The office computer could not be reached over WebRTC or the WebSocket fallback") }
                 } else if code == URLSessionWebSocketTask.CloseCode.normalClosure.rawValue {
                     self.teardown()
                     self.state = LiveState(status: .idle, detail: "Disconnected")
@@ -280,7 +280,7 @@ final class StreamSession {
             if via == .webRTC { fail(a, "The live view connection was lost") }
             else if player != nil { dropWebRTC() } // the WebSocket is already trying
             else if let startWs { startWs(false) } // no UDP path: don't wait out the head start
-            else { fail(a, "The office Mac could not be reached over WebRTC") }
+            else { fail(a, "The office computer could not be reached over WebRTC") }
         case .closed where state.status == .connected && via == .webRTC:
             teardown()
             state = LiveState(status: .idle, detail: "Disconnected")

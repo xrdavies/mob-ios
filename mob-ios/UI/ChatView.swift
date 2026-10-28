@@ -126,14 +126,14 @@ struct ChatView: View {
             HStack(spacing: 5) {
                 Circle().fill(app.isConnected ? Color.success : .red).frame(width: 7, height: 7)
                 if let m = app.activeMachine, m.addresses.count > 1, let a = m.address {
-                    // Two ways to reach the Mac: show which one, and let the user switch here.
+                    // Two ways to reach the office computer: show which one, and let the user switch here.
                     Menu {
                         RouteMenuItems(machine: m, short: true)
                     } label: {
                         Text("\(m.name) · via \(m.label(a))").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
                 } else {
-                    Text(app.activeMachine?.name ?? "No office Mac").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text(app.activeMachine?.name ?? "No office computer").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 if let waiting = app.queued[app.activeMachineId ?? ""], waiting > 0 {
                     Text("· queue \(waiting)").font(.caption).foregroundStyle(.secondary)
@@ -150,15 +150,15 @@ struct ChatView: View {
     @ViewBuilder
     private func content(_ items: [TimelineItem], lastFooter: String?) -> some View {
         if app.activeMachine == nil {
-            empty("Add your office Mac to start", "Settings → Machines → Add machine") {
+            empty("Add your office computer to start", "Settings → Machines → Add machine") {
                 Button("Open Settings", action: openSettings).buttonStyle(.borderedProminent)
             }
         } else if let m = app.activeMachine, m.needsPairing {
-            empty("This device needs to be paired again", "mobd on \(m.name) does not accept this device. Run mobd link on the office Mac, then pair with the new link or QR code.") {
+            empty("This device needs to be paired again", "mobd on \(m.name) does not accept this device. Run mobd link on the office computer, then pair with the new link or QR code.") {
                 Button("Pair again") { pairing = PairRequest(machine: m) }.buttonStyle(.borderedProminent)
             }
         } else if chat.currentId == nil && outgoing == nil {
-            empty("New chat on \(app.activeMachine?.name ?? "")", "Ask the agent to do something on the office Mac")
+            empty("New chat on \(app.activeMachine?.name ?? "")", "Ask the agent to do something on the office computer")
         } else if chat.detail == nil && chat.loading && outgoing == nil {
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -328,7 +328,7 @@ struct SessionList: View {
             Button("Delete", role: .destructive) { if let s = deleting { chat.delete(s) } }
         } message: {
             let extra = app.desktops.mark(deleting?.id ?? "") != nil ? " Its desktop closes; open windows are lost." : ""
-            Text("The chat and its screenshots are removed from the office Mac. This cannot be undone.\(extra)")
+            Text("The chat and its screenshots are removed from the office computer. This cannot be undone.\(extra)")
         }
         .confirmationDialog(
             Text("Close desktop?"),
@@ -383,7 +383,7 @@ struct SessionList: View {
         } label: {
             HStack(spacing: 5) {
                 Circle().fill(app.isConnected ? Color.success : .red).frame(width: 7, height: 7)
-                Text(app.activeMachine?.name ?? "No office Mac").lineLimit(1)
+                Text(app.activeMachine?.name ?? "No office computer").lineLimit(1)
                 Image(systemName: "chevron.up.chevron.down").font(.caption2)
             }
         }

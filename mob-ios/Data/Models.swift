@@ -366,7 +366,7 @@ enum AddressKind: String {
     }
 }
 
-/// An office Mac running mobd: one row, reached over one or more addresses. Stored on the phone
+/// An office computer running mobd: one row, reached over one or more addresses. Stored on the phone
 /// only; the device tokens live in the Keychain, not in this JSON.
 struct Machine: Codable, Identifiable, Hashable {
     var id: String

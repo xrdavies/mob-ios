@@ -3,7 +3,7 @@ import Observation
 import UIKit
 import UserNotifications
 
-/// App-wide state: office Macs, the active machine's health, chats, live view and notifications.
+/// App-wide state: office computers, the active machine's health, chats, live view and notifications.
 @MainActor @Observable
 final class AppState: MachineEvents {
     /// For the background refresh handler, which iOS calls outside the view hierarchy.
@@ -56,7 +56,7 @@ final class AppState: MachineEvents {
     @ObservationIgnored var foreground = true
     @ObservationIgnored private var desktopUsers = 0
     @ObservationIgnored private var healthTask: Task<Void, Never>?
-    /// Global event streams, one per machine, so every Mac can notify (not only the active one).
+    /// Global event streams, one per machine, so every machine can notify (not only the active one).
     @ObservationIgnored private var watchers: [String: MachineWatcher] = [:]
     /// Machines whose event stream is connected over the address in use.
     private var liveMachines = Set<String>()
@@ -301,7 +301,7 @@ final class AppState: MachineEvents {
     func connectDesktop(control: Bool = false) {
         guard let m = activeMachine, !m.needsPairing else { return stream.disconnect() }
         guard let health else { return } // connects when health arrives
-        if !health.supports("stream") { return stream.unavailable("Update mobd on the office Mac to use the live desktop") }
+        if !health.supports("stream") { return stream.unavailable("Update mobd on the office computer to use the live desktop") }
         let sessionId = health.sessionDesktops ? chat.currentId : nil
         // Before the first turn a new chat has no desktop yet.
         guard health.sessionDesktops == false || sessionId != nil else {

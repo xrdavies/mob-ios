@@ -95,18 +95,18 @@ func pair(link: PairLink, name: String) async throws -> PairResult {
     switch http.statusCode {
     case 200..<300: break
     case 300..<400: throw PairError(message: "The address redirected elsewhere, so pairing stopped. Use the link exactly as mobd link printed it.")
-    case 401: throw PairError(message: "This invitation is invalid, expired or already used. Run mobd link again on the office Mac.")
+    case 401: throw PairError(message: "This invitation is invalid, expired or already used. Run mobd link again on the office computer.")
     case 400:
         let detail = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
         throw PairError(message: "mobd rejected the request" + (detail.map { ": \($0)" } ?? ". Check the device name."))
-    case 503: throw PairError(message: "The office Mac could not save the pairing (storage problem). Check mobd there and try again.")
+    case 503: throw PairError(message: "The office computer could not save the pairing (storage problem). Check mobd there and try again.")
     case 404:
         // mobd answers pairing_closed while no invitation is open (used, expired or closed).
         let code = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["code"] as? String
         if code == "pairing_closed" {
-            throw PairError(message: "This invitation is invalid, expired or already used. Run mobd link again on the office Mac.")
+            throw PairError(message: "This invitation is invalid, expired or already used. Run mobd link again on the office computer.")
         }
-        throw PairError(message: "This mobd does not support pairing. Update mobd on the office Mac.")
+        throw PairError(message: "This mobd does not support pairing. Update mobd on the office computer.")
     default: throw PairError(message: "Pairing failed: HTTP \(http.statusCode)")
     }
     guard let result = try? JSONDecoder().decode(PairResult.self, from: data), !result.token.isEmpty, !result.clientId.isEmpty else {

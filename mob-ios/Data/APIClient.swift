@@ -110,10 +110,10 @@ final class APIClient {
     }
 
     /// A gateway error without mobd's JSON body comes from the proxy in front of it (Tailscale
-    /// Serve or Funnel): the office Mac answered, mobd did not.
+    /// Serve or Funnel): the office computer answered, mobd did not.
     static func proxyMessage(_ status: Int) -> String? {
         switch status {
-        case 502, 503: return "The office Mac answered, but mobd is not running there. Start it with mobd start."
+        case 502, 503: return "The office computer answered, but mobd is not running there. Start it with mobd start."
         case 504: return "mobd did not answer in time"
         default: return nil
         }
