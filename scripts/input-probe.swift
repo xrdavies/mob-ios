@@ -32,7 +32,7 @@ final class Probe: NSView {
     override func draw(_ dirtyRect: NSRect) {
         NSColor(calibratedRed: 0.07, green: 0.15, blue: 0.22, alpha: 1).setFill()
         dirtyRect.fill()
-        let text = "MOB iOS · local input test\n\nThis window records harmless test input only. Press Esc to close.\n\nEvents: \(events.count)\n\n" + events.suffix(9).map { "\($0["kind"]!)  \($0["text"]!)  (\($0["x"]!), \($0["y"]!))" }.joined(separator: "\n")
+        let text = "MOB iOS · local input test\n\nThis window records harmless test input only. Press Esc to close.\n\nHeartbeat: \(Int(Date().timeIntervalSince1970 * 2)) · Events: \(events.count)\n\n" + events.suffix(9).map { "\($0["kind"]!)  \($0["text"]!)  (\($0["x"]!), \($0["y"]!))" }.joined(separator: "\n")
         (text as NSString).draw(in: NSRect(x: 80, y: 150, width: bounds.width - 160, height: bounds.height - 200), withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: 26, weight: .medium), .foregroundColor: NSColor.white])
     }
 }
@@ -41,7 +41,7 @@ func save() {
     let locked = (CGSessionCopyCurrentDictionary() as? [String: Any])?["CGSSessionScreenIsLocked"] as? Bool == true
     let obj: [String: Any] = [
         "name": "mob-ios-input-probe", "hosts": hosts, "at": Date().timeIntervalSince1970,
-        "ready": !locked && window.isVisible, "width": screen.width, "height": screen.height, "events": events
+        "ready": !locked && app.isActive && window.isVisible, "width": screen.width, "height": screen.height, "events": events
     ]
     if let data = try? JSONSerialization.data(withJSONObject: obj) { try? data.write(to: output, options: .atomic) }
 }
@@ -57,5 +57,6 @@ window.makeKeyAndOrderFront(nil)
 window.makeFirstResponder(probe)
 app.activate(ignoringOtherApps: true)
 save()
-let heartbeat = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in save() }
+// A changing picture is needed: mobd does not encode an unchanged screen.
+let heartbeat = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in save(); probe.needsDisplay = true }
 app.run()

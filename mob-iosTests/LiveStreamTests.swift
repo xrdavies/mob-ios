@@ -59,7 +59,8 @@ final class LiveStreamTests: XCTestCase {
         let first = Date().timeIntervalSince(started)
         let opened = (s.state.width, s.state.height)
         let frames = s.frames
-        try await wait("continuing video frames", 5) { s.frames > frames }
+        // WebRTC's UI frame counter is sampled every 30 frames; decoded stats also cover low fps.
+        try await wait("continuing video frames", 5) { s.frames > frames || (s.readout?.fps ?? 0) > 0 }
 
         if let probe {
             try await checkInput(s, path: probe, host: client.baseURL.host ?? "")

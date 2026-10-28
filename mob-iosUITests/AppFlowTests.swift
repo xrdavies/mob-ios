@@ -70,7 +70,22 @@ final class AppFlowTests: XCTestCase {
         shot("log")
     }
 
-    func testDraftSurvivesRotationAndBackground() {
+    func testAccessibilityAudit() throws {
+        guard ProcessInfo.processInfo.environment["MOBD_ACCESSIBILITY_AUDIT"] == "1" else {
+            throw XCTSkip("Set MOBD_ACCESSIBILITY_AUDIT=1 to reproduce the outstanding accessibility findings")
+        }
+        continueAfterFailure = true
+        let report: (XCUIAccessibilityAuditIssue) -> Bool = { issue in
+            print("accessibility: \(issue.compactDescription): \(issue.element?.debugDescription ?? "no element")")
+            return false
+        }
+        try app.performAccessibilityAudit(for: .all, report)
+        app.buttons["Settings"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Machines"].waitForExistence(timeout: 10))
+        try app.performAccessibilityAudit(for: .all, report)
+    }
+
+    func testDraftSurvivesRotationAndBackground() throws {
         let newChat = app.buttons["New chat"].firstMatch
         XCTAssertTrue(newChat.waitForExistence(timeout: 15))
         if newChat.isEnabled { newChat.tap() }
@@ -79,19 +94,24 @@ final class AppFlowTests: XCTestCase {
         XCTAssertTrue(field.waitForExistence(timeout: 10))
         field.tap()
         field.typeText(draft)
+        let attachments = try attachTestPhotoIfRequested()
         defer { XCUIDevice.shared.orientation = .portrait }
         for orientation: UIDeviceOrientation in [.landscapeLeft, .portrait] {
             XCUIDevice.shared.orientation = orientation
+            waitForComposer()
             XCTAssertEqual(field.value as? String, draft)
             XCTAssertTrue(field.isHittable)
             XCTAssertTrue(app.buttons["Send"].isHittable)
+            XCTAssertEqual(app.buttons.matching(identifier: "Remove image").count, attachments)
             shot("draft-\(orientation.rawValue)")
         }
         XCUIApplication(bundleIdentifier: "com.apple.Preferences").launch()
         XCTAssertTrue(app.wait(for: .runningBackground, timeout: 10), "The app did not enter the background")
         app.activate()
+        waitForComposer()
         XCTAssertEqual(field.value as? String, draft)
         XCTAssertTrue(app.buttons["Send"].isHittable)
+        XCTAssertEqual(app.buttons.matching(identifier: "Remove image").count, attachments)
         shot("draft-restored")
     }
 
@@ -110,6 +130,7 @@ final class AppFlowTests: XCTestCase {
         let draft = "Unsent Duo folding regression draft"
         field.tap()
         field.typeText(draft)
+        let attachments = try attachTestPhotoIfRequested()
         for step in 1...count {
             let before = app.windows.firstMatch.frame.size
             print("display-transition[\(step)]: waiting at \(before)")
@@ -117,11 +138,108 @@ final class AppFlowTests: XCTestCase {
                 self.app.windows.firstMatch.frame.size != before
             }, object: nil)
             XCTAssertEqual(XCTWaiter.wait(for: [changed], timeout: 90), .completed)
+            waitForComposer()
             XCTAssertEqual(field.value as? String, draft)
             XCTAssertTrue(field.isHittable)
             XCTAssertTrue(app.buttons["Send"].isHittable)
+            XCTAssertEqual(app.buttons.matching(identifier: "Remove image").count, attachments)
             shot("display-transition-\(step)")
         }
+    }
+
+    private func waitForComposer() {
+        let usable = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            self.app.descendants(matching: .any)["composer"].isHittable && self.app.buttons["Send"].isHittable
+        }, object: nil)
+        let result = XCTWaiter.wait(for: [usable], timeout: 10)
+        if result != .completed { shot("composer-unusable"); print(app.debugDescription) }
+        XCTAssertEqual(result, .completed, "Composer did not become usable after the transition")
+    }
+
+    func testHistoryAcrossDisplayChanges() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let title = env["MOBD_HISTORY_CHAT_TITLE"], let count = env["MOBD_DISPLAY_CHANGES"].flatMap(Int.init), count > 0 else {
+            throw XCTSkip("Set MOBD_HISTORY_CHAT_TITLE and MOBD_DISPLAY_CHANGES for read-only history checks")
+        }
+        let chats = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Chats'")).firstMatch
+        if chats.exists { chats.tap() }
+        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", title + ",")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 15))
+        row.tap()
+        let timeline = app.scrollViews["chatTimeline"]
+        XCTAssertTrue(timeline.waitForExistence(timeout: 15))
+        timeline.swipeDown()
+        timeline.swipeDown()
+        let anchor = try XCTUnwrap(timeline.staticTexts.allElementsBoundByIndex.first { $0.isHittable && $0.label.count > 30 }?.label)
+        shot("history-before-transition")
+        for step in 1...count {
+            let before = app.windows.firstMatch.frame.size
+            print("history-transition[\(step)]: waiting at \(before)")
+            let changed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in self.app.windows.firstMatch.frame.size != before }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [changed], timeout: 90), .completed)
+            let retained = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                timeline.staticTexts.matching(NSPredicate(format: "label == %@", anchor)).firstMatch.isHittable
+            }, object: nil)
+            let result = XCTWaiter.wait(for: [retained], timeout: 10)
+            shot("history-transition-\(step)")
+            XCTAssertEqual(result, .completed, "The visible history moved away after folding")
+        }
+    }
+
+    func testDraftAcrossSplitView() throws {
+        guard ProcessInfo.processInfo.environment["MOBD_SPLIT_VIEW"] == "1" else {
+            throw XCTSkip("Set MOBD_SPLIT_VIEW=1 on the Duo's open inner display")
+        }
+        let newChat = app.buttons["New chat"].firstMatch
+        XCTAssertTrue(newChat.waitForExistence(timeout: 15))
+        if newChat.isEnabled { newChat.tap() }
+        let field = app.descendants(matching: .any)["composer"]
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        let draft = "Unsent Duo split view regression draft"
+        field.tap()
+        field.typeText(draft)
+        let attachments = try attachTestPhotoIfRequested()
+        let window = app.windows.firstMatch
+        let full = window.frame
+        XCTAssertGreaterThan(full.width, 900, "Run this test on the open inner display")
+        for (step, x) in [CGFloat(0.12), 0.88].enumerated() {
+            let start = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.995))
+            let target = window.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: full.width * x - window.frame.minX, dy: full.height / 2))
+            start.press(forDuration: 0.1, thenDragTo: target, withVelocity: .slow, thenHoldForDuration: 1)
+            let moved = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                let frame = window.frame
+                return frame.width < full.width * 0.75 && (step == 0 ? frame.minX < full.width / 4 : frame.minX > full.width / 4)
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [moved], timeout: 10), .completed, "The app did not enter the requested split side")
+            waitForComposer()
+            XCTAssertEqual(field.value as? String, draft)
+            XCTAssertEqual(app.buttons.matching(identifier: "Remove image").count, attachments)
+            shot("split-view-\(step)")
+        }
+        let origin = window.coordinate(withNormalizedOffset: .zero)
+        let divider = origin.withOffset(CGVector(dx: full.width / 2 - window.frame.minX, dy: full.height / 2))
+        let edge = origin.withOffset(CGVector(dx: 2 - window.frame.minX, dy: full.height / 2))
+        divider.press(forDuration: 0.1, thenDragTo: edge, withVelocity: .slow, thenHoldForDuration: 1)
+        let restored = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in window.frame.width > full.width * 0.95 }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [restored], timeout: 10), .completed, "The app did not leave Split View")
+    }
+
+    /// Only select the explicitly named synthetic photo seeded with simctl addmedia.
+    private func attachTestPhotoIfRequested() throws -> Int {
+        guard let label = ProcessInfo.processInfo.environment["MOBD_TEST_PHOTO_LABEL"] else { return 0 }
+        let attach = app.buttons["Attach images"]
+        XCTAssertTrue(attach.isEnabled, "The paired mobd/runner must support image uploads")
+        attach.tap()
+        let photo = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).firstMatch
+        XCTAssertTrue(photo.waitForExistence(timeout: 10), app.debugDescription)
+        photo.tap()
+        let add = app.buttons["Add"] // The picker keeps this identifier while its label is "Done".
+        XCTAssertTrue(add.waitForExistence(timeout: 5), app.debugDescription)
+        add.tap()
+        XCTAssertTrue(app.buttons["Remove image"].waitForExistence(timeout: 15))
+        let uploaded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in self.app.buttons["Send"].isEnabled }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [uploaded], timeout: 20), .completed, "The fixture did not finish uploading")
+        return 1
     }
 
     func testLiveViewResizeAndControlRelease() {

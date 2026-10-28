@@ -58,11 +58,20 @@ swiftc scripts/input-probe.swift -o /tmp/mob-ios-input-probe
 /tmp/mob-ios-input-probe
 ```
 
-It covers the desktop and records test clicks, drag, text, arrow keys and scroll; Esc closes it. Tests check release on the background notification and suppression of input in View mode. They refuse a locked, stale or different-host probe. Run `-only-testing:mob-iosTests/LiveStreamTests` with the environment above; omit the probe variable to skip control cases.
+It covers the desktop and records test clicks, drag, text, arrow keys and scroll; Esc closes it. Tests check release on the background notification and suppression of input in View mode. They refuse a locked, inactive, stale or different-host probe. The window redraws a heartbeat so an unchanged desktop does not stall the frame assertions. Run `-only-testing:mob-iosTests/LiveStreamTests` with the environment above; omit the probe variable to skip control cases.
 
 UI tests expect a paired machine. `testDraftSurvivesRotationAndBackground` verifies an unsent draft after rotation and a confirmed switch to Settings. `testLiveViewResizeAndControlRelease` checks decoded video, actual UI resize messages and return to View after backgrounding. `testSendAndStreamReply` sends one new-chat message only with `TEST_RUNNER_MOBD_SEND_TEST_MESSAGE=1`; approve the real model request before enabling it.
 
 `testDraftAcrossDisplayChanges` is an operator-assisted test: set `TEST_RUNNER_MOBD_DISPLAY_CHANGES` to the number of transitions, then fold/unfold or resize in Device Hub at each `display-transition[n]` checkpoint. It waits for an actual window-size change and checks that the draft and Send button survive. It fails if no transition happens; it is skipped by default. UI screenshots include every screen reported by XCTest (including the Duo inner screen); use `simctl io … screenshot --display=primary-1` to verify the inner screen if XCTest returns black images.
+
+`testLiveTouchCoordinatesAndZoom` uses the same local probe to check the actual full-screen UI: View suppresses input, pinch/pan/double-tap affect coordinates, letterbox taps are ignored, and rotation, right-click, drag and keyboard input reach the probe. Keep the probe in the foreground during these cases.
+
+Optional UI checks (all disabled unless explicitly configured):
+
+- Set `TEST_RUNNER_MOBD_TEST_PHOTO_LABEL` to the exact accessibility label of a synthetic photo imported with `simctl addmedia`. Draft tests select only that photo, upload it to local mobd, and verify the attachment count after transitions; they never send it to a model. The label is the picker date/time, not the filename.
+- Set `TEST_RUNNER_MOBD_SPLIT_VIEW=1` on the Duo's open inner display for `testDraftAcrossSplitView`. It drags the app into both split sides and checks the draft and any seeded attachment.
+- Set `TEST_RUNNER_MOBD_HISTORY_CHAT_TITLE` and `TEST_RUNNER_MOBD_DISPLAY_CHANGES` for `testHistoryAcrossDisplayChanges`. Choose an existing conversation with enough history; it only reads it and checks that the visible text survives each operator-assisted display transition.
+- Set `TEST_RUNNER_MOBD_ACCESSIBILITY_AUDIT=1` for `testAccessibilityAudit`. This intentionally reports all issues without suppressions; current failures are recorded in the Duo task document.
 
 `LayoutTests.testSettingsAndPairingAcrossRotation` needs no paired machine; repeat it with Device Hub's inner and outer screens. `testPairMachineFromLink` adds a paired device only when `TEST_RUNNER_MOBD_PAIR_LINK` contains a fresh, single-use `mobd link` invitation. Neither layout test sends a chat message. On this Xcode/runtime combination, add `-collect-test-diagnostics never` if automatic simulator diagnostics stall after tests finish; normal result bundles and attachments are still generated.
 
