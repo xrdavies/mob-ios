@@ -48,6 +48,7 @@ final class AppState: MachineEvents {
     let chat = ChatStore()
     let drafts = ChatDrafts()
     let desktops = DesktopStore()
+    let files = FileTransferStore()
     /// One live view shared by the thumbnail and the full-screen view.
     let stream = StreamSession()
     let notifier = Notifier()
@@ -86,6 +87,7 @@ final class AppState: MachineEvents {
         apiClient = APIClient(baseURL: "", token: nil)
         if changed { saveMachines() }
         chat.onUnauthorized = { [weak self] id in self?.markNeedsPairing(id) }
+        files.onUnauthorized = { [weak self] error, client in self?.noteFailure(error, client: client) }
         chat.onOpen = { [weak self] in self?.followChat() }
         stream.onReady = { [weak self] in self?.resizeDesktop() }
         stream.onUnauthorized = { [weak self] client in
@@ -121,6 +123,7 @@ final class AppState: MachineEvents {
         // An unpaired machine gets no requests until it is paired again.
         chat.attach(m == nil || m?.needsPairing == true ? nil : apiClient, machine: m?.id ?? "")
         desktops.attach(m == nil || m?.needsPairing == true ? nil : apiClient)
+        files.attach(m == nil || m?.needsPairing == true ? nil : apiClient, machine: m?.id ?? "")
         chat.live = m.map { liveMachines.contains($0.id) } ?? false
         healthTask?.cancel()
         healthTask = Task { [weak self] in
