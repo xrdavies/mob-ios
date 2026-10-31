@@ -26,6 +26,9 @@ Same as [mob-android](https://github.com/xrdavies/mob-android):
 
 ## Live desktop
 
+System audio is not implemented. The [remote audio draft](docs/desktop-audio.md)
+covers both transports, iOS playback routing and audio/video synchronization.
+
 A thumbnail under the title (hidden by default, toggled from the top bar; view-only; beside the chat on iPad) and a full-screen view with **View / Control**. Control: tap = click, long-press = right-click, drag = drag, two fingers = scroll, pinch = zoom, plus the phone keyboard and a keys bar (⌘ ⌥ ⌃ ⇧ latched for the next key, Esc, Tab, arrows, Paste types the phone's clipboard). Held input is released on View and in the background.
 
 - **WebRTC**: `POST /stream` with a non-trickle offer; receive-only H.264 shown by `RTCMTLVideoView`; input on the `input` / `pointer` / `control` data channels, with points normalized to the desktop inside the letterbox. Protocol: [mobd desktop streaming](https://github.com/xrdavies/mobd/blob/main/docs/desktop-streaming.md).
