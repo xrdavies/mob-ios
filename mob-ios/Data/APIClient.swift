@@ -144,19 +144,27 @@ final class APIClient {
         let answer: String?
         let width: Int
         let height: Int
+        /// The answer to `audio`: "ready", or "unavailable" with a reason for the user.
+        var audio: StreamAudio? = nil
+    }
+
+    struct StreamAudio: Decodable {
+        let status: String
+        var reason: String? = nil
     }
 
     /// Opens a live desktop session (POST /stream); the answer has `session`, `width`, `height` and
     /// optionally `answer` (the remote SDP when mobd negotiated WebRTC; nil means WebSocket only).
-    func openStream(offer: String, maxWidth: Int, maxHeight: Int, quality: String, sessionId: String? = nil) async throws -> StreamAnswer {
-        let body = APIClient.streamBody(offer: offer, maxWidth: maxWidth, maxHeight: maxHeight, quality: quality, sessionId: sessionId)
+    func openStream(offer: String, maxWidth: Int, maxHeight: Int, quality: String, sessionId: String? = nil, audio: Bool = false) async throws -> StreamAnswer {
+        let body = APIClient.streamBody(offer: offer, maxWidth: maxWidth, maxHeight: maxHeight, quality: quality, sessionId: sessionId, audio: audio)
         return try APIClient.decoder.decode(StreamAnswer.self, from: await send("POST", "stream", body: body))
     }
 
     /// The POST /stream body; `sessionId` picks the conversation's desktop (mobd with `sessionDesktops`).
-    static func streamBody(offer: String, maxWidth: Int, maxHeight: Int, quality: String, sessionId: String?) -> [String: Any] {
+    static func streamBody(offer: String, maxWidth: Int, maxHeight: Int, quality: String, sessionId: String?, audio: Bool = false) -> [String: Any] {
         var body: [String: Any] = ["offer": offer, "maxWidth": maxWidth, "maxHeight": maxHeight, "quality": quality]
         if let sessionId { body["sessionId"] = sessionId }
+        if audio { body["audio"] = true }
         return body
     }
 

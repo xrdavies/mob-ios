@@ -262,4 +262,34 @@ final class WebSocketVideoTests: XCTestCase {
         if let format { XCTAssertEqual(CMVideoFormatDescriptionGetDimensions(format).width, 1280) }
         XCTAssertNil(h264Format(annexBUnits(Data([0, 0, 0, 1, 0x41, 0x9a])))) // a delta frame has no SPS
     }
+
+    func testSoundMessagesAndRequest() throws {
+        XCTAssertEqual(ControlMessage.parse(Data(#"{"t":"audio","state":"on"}"#.utf8)), .audio(state: "on", message: ""))
+        XCTAssertEqual(ControlMessage.parse(Data(#"{"t":"audio","state":"error","message":"sound ended"}"#.utf8)),
+                       .audio(state: "error", message: "sound ended"))
+        let body = APIClient.streamBody(offer: "sdp", maxWidth: 1280, maxHeight: 720, quality: "auto", sessionId: nil, audio: true)
+        XCTAssertEqual(body["audio"] as? Bool, true)
+        XCTAssertNil(APIClient.streamBody(offer: "sdp", maxWidth: 1, maxHeight: 1, quality: "auto", sessionId: nil)["audio"],
+                     "older mobd never sees the field unless sound is offered")
+        let ready = try APIClient.decoder.decode(APIClient.StreamAnswer.self, from: Data(#"""
+            {"session":"s","answer":"v=0","width":1280,"height":720,"audio":{"status":"ready","codec":"opus","channels":2}}
+            """#.utf8))
+        XCTAssertEqual(ready.audio?.status, "ready")
+        let none = try APIClient.decoder.decode(APIClient.StreamAnswer.self, from: Data(#"{"session":"s","width":1,"height":1}"#.utf8))
+        XCTAssertNil(none.audio)
+        XCTAssertTrue(LiveSound.starting.isOn)
+        XCTAssertFalse(LiveSound.unavailable("x").isOn)
+    }
+
+    @MainActor
+    func testSoundStaysOffUntilTurnedOnAndClosingTheViewTurnsItOff() {
+        let s = StreamSession()
+        XCTAssertEqual(s.sound, .none)
+        s.setSound(true)
+        XCTAssertTrue(PlaybackAudioDevice.shared.audible)
+        s.disconnect(keepSound: true)
+        XCTAssertTrue(PlaybackAudioDevice.shared.audible, "a reconnect keeps the choice")
+        s.disconnect()
+        XCTAssertFalse(PlaybackAudioDevice.shared.audible, "closing the view turns sound off")
+    }
 }
