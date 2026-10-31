@@ -63,6 +63,8 @@ enum ControlMessage: Equatable {
     case ended(String)
     case error(about: String, message: String)
     case cursor(x: Double, y: Double)
+    /// The answer to turning sound on or off, or why it stopped: on, off, unavailable or error.
+    case audio(state: String, message: String)
 
     /// A message from mobd's `control` channel; nil for anything unknown or malformed.
     static func parse(_ data: Data) -> ControlMessage? {
@@ -76,6 +78,7 @@ enum ControlMessage: Equatable {
         case "ended": return .ended(str("message").isEmpty ? "The office computer ended the live view" : str("message"))
         case "error": return .error(about: str("about"), message: str("message"))
         case "cursor": return .cursor(x: num("x"), y: num("y"))
+        case "audio": return .audio(state: str("state"), message: str("message"))
         default: return nil
         }
     }

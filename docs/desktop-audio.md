@@ -1,112 +1,60 @@
-# Remote desktop audio
+# Remote desktop audio (iOS)
 
-Status: draft, 2026-11-01. Not implemented.
+Status: implemented on `feat/remote-audio` (WebRTC). No sound over the WebSocket fallback, by decision.
 
-Follow the [mobd audio contract](https://github.com/xrdavies/mobd/blob/main/docs/desktop-audio.md)
-for `streamAudio`, the optional `audio:true` request/result, Opus, WebSocket
-type `2`/`audioAck`, shared clocks, failure behavior and acceptance targets.
-Both WebRTC and WebSocket are required for feature completion on iPhone/iPad.
+You hear the office computer's sound in the live view on iPhone and iPad. The protocol, stages
+and capture are in [mobd's desktop audio doc](https://github.com/xrdavies/mobd/blob/main/docs/desktop-audio.md):
+`streamAudio` in `/health`, `audio: true` on `POST /stream`, and `{"t":"audio","on":…}` on the
+control channel.
 
-## Current state and change boundaries
+## Playback without the microphone
 
-`StreamSession` currently offers only video through the existing stasel WebRTC
-package. `WsPlayer` handles H.264 and `AVSampleBufferDisplayLayer`. There is no
-remote-audio player. Reuse these session lifetimes rather than opening another
-remote session or adding a full media SDK.
+WebRTC's own iOS audio device is built for calls: voice processing and play-and-record, which
+can open the microphone and route sound like a phone call. `Stream/PlaybackAudioDevice.swift`
+replaces it (`RTCPeerConnectionFactory(…, audioDevice:)`):
 
-| Area | Planned change |
-| --- | --- |
-| `mob-ios/Data/APIClient.swift` and response models | Audio request/result and capability handling |
-| `mob-ios/Stream/StreamSession.swift` | Audio transceiver, output ownership, transport race and interruption handling |
-| `mob-ios/Stream/WsPlayer.swift`, `StreamProtocol.swift` | Audio packet validation, acknowledgement, decode/playback and timestamp mapping |
-| `mob-ios/UI/Desktop.swift` | Sound/mute state, unavailable/retry explanation and accessibility |
-| `mob-ios/Info.plist`, package configuration | Review existing microphone usage description; package only the decoder needed for WebSocket |
-| `mob-iosTests/StreamTests.swift`, `LiveStreamTests.swift` and UI tests | Pure protocol cases plus audible playback/lifecycle coverage |
+- It only plays. Its recording methods refuse, so WebRTC never records and iOS never asks for
+  the microphone.
+- An `AVAudioEngine` source node pulls WebRTC's decoded 48 kHz stereo PCM (`getPlayoutData`).
+- The audio session is `.playback`, mode `.default`: media, following the volume buttons and the
+  chosen output, and playing with the silent switch on, like a video app.
+- The engine runs only while WebRTC has sound **and** the user turned it on; otherwise the audio
+  session is released (`notifyOthersOnDeactivation`).
+- After a call or Siri, and after an output change (headphones, Bluetooth), it starts again if
+  sound is still on.
+- When it stops it logs `live view sound: played N s, peak P%` (Settings → Log), so silence can be
+  told apart from nothing arriving.
 
-## Sound flow and WebRTC
+## Session and UI
 
-A newly opened live view starts with sound off. Explicit Sound checks capability
-and reopens a video-only session with `audio:true`, keeping view geometry and
-releasing held remote input. Add an audio `.recvOnly` transceiver and consume
-the remote track through the existing WebRTC library. Do not create an audio
-source, send track or microphone capture session.
+`StreamSession`:
 
-The session, not an individual thumbnail/full-screen renderer, owns audio.
-Only the winning transport may play; close the losing audio path. Local mute
-and system media volume do not change the office computer's output volume or
-promise to stop capture. Muting must not queue sound for later playback.
+- With `streamAudio`, the offer gets a receive-only audio transceiver and the request
+  `audio: true`.
+- The answer's `audio` sets `sound`: `.off`, or `.unavailable(reason)`.
+- `setSound(_:)` sends the control message and tells the audio device.
+- mobd's `audio` messages move it to `.on`, `.unavailable` or `.error`.
+- Over the WebSocket, sound is unavailable by decision (mobd's doc: sound that stutters is worse than none).
 
-Audio failure leaves video/input working. Use the server result and
-`about:audio` errors for explanations and retry; do not interpret a silent
-application as missing support. Preserve the user's sound choice during a
-transient reconnect inside the same view, but resume only current audio.
+Turning sound on and off:
 
-## iOS audio session
+- A new live view starts with sound off.
+- Reconnects within the view keep the choice.
+- Closing the view (the last thumbnail or full-screen view gone) or going to the background turns
+  it off.
 
-Configure playback deliberately and coordinate `AVAudioSession` through the
-WebRTC audio-session API while WebRTC owns the output. Upstream defaults use
-voice-chat/play-and-record settings and may prefer mono; they are not the
-acceptance criteria for game sound. Start from a playback-oriented category and
-normal media mode, stereo output where the route supports it, without enabling
-recording. Verify the exact pinned WebRTC package accepts this configuration.
-If its default audio device requires voice-processing I/O, use its supported
-playback-only device integration rather than activating the microphone.
+`SoundButton` in `UI/Desktop.swift`: on the thumbnail (bottom right) and in the full-screen
+toolbar. A speaker icon, green while on, a spinner while starting; when unavailable it explains
+why.
 
-Receive-only SDP alone does not prove that the audio device never opens input.
-Verify no microphone prompt/indicator on clean installs and reconnects. The
-existing `NSMicrophoneUsageDescription` entry is a packaging detail, not
-authorization to record. Review its wording during implementation without
-removing required package declarations speculatively.
+## Verification
 
-Handle interruption begin/end, audio route changes and engine reconfiguration.
-Do not force the earpiece or a Bluetooth hands-free input route for media.
-Respect system output/volume selection; report actual stereo capability and
-measure Bluetooth separately. Return from an interruption only if this view
-still owns playback and the user had enabled sound.
+- `StreamTests.testSoundMessagesAndRequest`: control messages, the request and answer.
+- `testSoundStaysOffUntilTurnedOnAndClosingTheViewTurnsItOff`: the lifecycle.
+- By hand in the simulator against a mobd from the branch on this Mac: sound turned on from the
+  full-screen view, and the device logged 7.4 s of playback at a 9% peak while system sounds
+  played.
 
-## WebSocket playback and sync
-
-Parse the negotiated raw Opus packets separately from video and acknowledge
-network consumption using `audioAck`, including while muted. Use a pinned
-libopus decoder for this path unless a verified public platform decoder consumes
-the exact raw packet format. The WebRTC package's internal decoder is not
-assumed to be a public general-purpose Opus decoder.
-
-Feed PCM to `AVAudioEngine`/`AVAudioPlayerNode` using a bounded queue; start with
-60 ms target and 200 ms maximum pending audio. Decode off the main actor and
-avoid one unbounded scheduled buffer per network packet. Flush stale audio on
-discontinuity, reconnect and output reset; account for codec priming/latency in
-the shared fixture. Use audio render sample time to map host PTS to local time
-and drive the video layer's presentation timing. Hold the last image when the
-screen is idle; audio must continue without new video frames.
-
-WebRTC and the fallback engine must not compete to configure the audio session.
-Switch ownership once a transport wins, and release the other engine. Decoding,
-route or playback failure must not tear down an otherwise usable video stream.
-
-## Lifecycle and acceptance
-
-Follow the existing foreground live-view lifecycle. Backgrounding, closing the
-view, switching machine/conversation, revocation or stream replacement stops
-output and flushes samples. Do not add a background-audio entitlement. On return,
-resume through the live-view connection flow with no old audio replay. Controls
-need VoiceOver labels and the same state in thumbnail/full-screen views.
-
-Add pure tests for format/result decoding, packet bounds, acknowledgements,
-queue limits, discontinuity and stale callback suppression. Extend existing
-`LiveStreamTests` with an isolated stereo-tone/flash fixture over WebRTC and
-forced WebSocket, without asking an agent to generate sound.
-
-Verify on physical iPhone and iPad, including the minimum supported iOS version:
-left/right playback, no microphone access, built-in/wired/Bluetooth output,
-phone/Siri interruptions, route changes, mute/unmute, background/foreground,
-reconnect, duplicate-renderer ownership and 30-minute A/V drift. Compare latency
-and skew to the mobd targets; simulator results alone do not establish routing
-or real speaker latency. Exact audio-device compatibility and Opus packaging
-remain implementation validation gates, not completed work.
-
-## References
-
-- [WebRTC audio-session defaults](https://webrtc.googlesource.com/src/+/refs/heads/main/sdk/objc/components/audio/RTCAudioSessionConfiguration.m): reason to verify playback/route/stereo settings in the pinned build.
-- [AVAudioPlayerNode](https://developer.apple.com/documentation/avfaudio/avaudioplayernode): scheduled PCM playback for the fallback path.
-- [libopus](https://opus-codec.org/docs/): raw Opus decoding.
+Still to check on a physical iPhone and iPad: no microphone indicator, built-in, wired and
+Bluetooth output, calls and Siri, the silent switch, and audible delay. The simulator does not
+show real routing or latency.

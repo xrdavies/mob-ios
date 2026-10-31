@@ -5,6 +5,16 @@ import SwiftUI
 import UIKit
 import WebRTC
 
+/// The office computer's sound (mobd docs/desktop-audio.md): none where mobd cannot share it, off
+/// until the user turns it on, starting until mobd confirms.
+enum LiveSound: Equatable {
+    case none, off, starting, on
+    case unavailable(String)
+    case error(String)
+
+    var isOn: Bool { self == .on || self == .starting }
+}
+
 /// What carries the live picture once connected.
 enum LiveTransport: String {
     case webRTC = "WebRTC"
@@ -34,6 +44,7 @@ final class StreamSession {
     private(set) var modifiers: [String] = []
     /// The transport carrying the picture, once one has won.
     private(set) var transport: LiveTransport?
+    private(set) var sound: LiveSound = .none
 
     /// Frames drawn since connecting (for checks; not observed).
     @ObservationIgnored private(set) var frames = 0
@@ -60,6 +71,9 @@ final class StreamSession {
     @ObservationIgnored private var startWs: ((Bool) -> Void)?
     @ObservationIgnored private var graceTask: Task<Void, Never>?
     @ObservationIgnored private var lastRtt: Int?
+    /// The user turned sound on in this view; kept through reconnects, cleared when the view closes.
+    @ObservationIgnored private var wantSound = false
+    @ObservationIgnored private var audioReady = false
     /// The conversation's session ID (mobd with sessionDesktops); nil for a shared desktop (macOS).
     @ObservationIgnored private(set) var sessionId: String?
     /// The size the session was opened or last resized at, in pixels.
@@ -74,13 +88,19 @@ final class StreamSession {
     static let rememberedGrace: Duration = .seconds(1)
     nonisolated(unsafe) private static let factory: RTCPeerConnectionFactory = {
         RTCInitializeSSL()
-        return RTCPeerConnectionFactory(encoderFactory: RTCDefaultVideoEncoderFactory(), decoderFactory: RTCDefaultVideoDecoderFactory())
+        // A playback-only audio device: WebRTC's own is for calls and opens the microphone.
+        return RTCPeerConnectionFactory(encoderFactory: RTCDefaultVideoEncoderFactory(), decoderFactory: RTCDefaultVideoDecoderFactory(),
+                                        audioDevice: PlaybackAudioDevice.shared)
     }()
 
     init() {
         // A touch or key in flight never ends once the app leaves the screen.
         NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.setControl(false) }
+            MainActor.assumeIsolated {
+                self?.setControl(false)
+                // No sound from the background: the live view is a foreground thing.
+                if self?.wantSound == true { self?.setSound(false) }
+            }
         }
     }
 
@@ -88,8 +108,10 @@ final class StreamSession {
 
     /// Opens a session sized to the view (pixels); `control` takes control once the picture arrives.
     /// `preferWebSocket`: the WebSocket carried this machine's last session; race it after 1 s.
-    func connect(client: APIClient, maxWidth: Int, maxHeight: Int, quality: LiveQuality, control: Bool = false, preferWebSocket: Bool = false, sessionId: String? = nil) {
-        disconnect()
+    /// `audio`: mobd shares its sound (`streamAudio`); the view offers it, off until `setSound(true)`.
+    func connect(client: APIClient, maxWidth: Int, maxHeight: Int, quality: LiveQuality, control: Bool = false, preferWebSocket: Bool = false,
+                 sessionId: String? = nil, audio: Bool = false) {
+        disconnect(keepSound: true)
         attempt += 1
         let a = attempt
         self.sessionId = sessionId
@@ -99,7 +121,7 @@ final class StreamSession {
         size = (maxWidth, maxHeight)
         state = LiveState(status: .connecting, detail: "Connecting…")
         Log.add("live view: connecting over WebRTC (\(maxWidth)×\(maxHeight), \(quality.rawValue))")
-        Task { await run(a, client: client, maxWidth: maxWidth, maxHeight: maxHeight, quality: quality, preferWebSocket: preferWebSocket) }
+        Task { await run(a, client: client, maxWidth: maxWidth, maxHeight: maxHeight, quality: quality, preferWebSocket: preferWebSocket, audio: audio) }
         Task { [weak self] in
             try? await Task.sleep(for: Self.connectTimeout)
             guard let self, self.attempt == a, self.state.status == .connecting else { return }
@@ -107,7 +129,7 @@ final class StreamSession {
         }
     }
 
-    private func run(_ a: Int, client: APIClient, maxWidth: Int, maxHeight: Int, quality: LiveQuality, preferWebSocket: Bool) async {
+    private func run(_ a: Int, client: APIClient, maxWidth: Int, maxHeight: Int, quality: LiveQuality, preferWebSocket: Bool, audio: Bool) async {
         guard attempt == a else { return }
         let config = RTCConfiguration()
         config.sdpSemantics = .unifiedPlan // host candidates only: LAN and Tailscale
@@ -126,6 +148,7 @@ final class StreamSession {
             watcher = w
             track = t
         }
+        if audio { pc.addTransceiver(of: .audio, init: recv) }
         for (label, reliable) in [("control", true), ("input", true), ("pointer", false)] {
             let c = RTCDataChannelConfiguration()
             if !reliable {
@@ -151,9 +174,19 @@ final class StreamSession {
             guard attempt == a else { return }
             var sdpOffer = pc.localDescription?.sdp ?? offer.sdp
             if blockWebRTC { sdpOffer = withoutCandidates(sdpOffer) }
-            let answer = try await client.openStream(offer: sdpOffer, maxWidth: maxWidth, maxHeight: maxHeight, quality: quality.rawValue, sessionId: sessionId)
+            let answer = try await client.openStream(offer: sdpOffer, maxWidth: maxWidth, maxHeight: maxHeight, quality: quality.rawValue,
+                                                     sessionId: sessionId, audio: audio)
             guard attempt == a else { return client.closeStream(answer.session) }
             session = (client, answer.session)
+            if audio {
+                if answer.audio?.status == "ready" {
+                    audioReady = true
+                    sound = wantSound ? .starting : .off
+                } else {
+                    wantSound = false
+                    sound = .unavailable(answer.audio?.reason ?? "This office computer cannot share its sound.")
+                }
+            }
             Log.add("live view: answered in \(ms()) ms, \(answer.width)×\(answer.height)")
             startWs = { [weak self] race in self?.openWebSocket(a, client: client, session: answer.session, race: race) }
             let grace = preferWebSocket ? Self.rememberedGrace : Self.webRTCGrace
@@ -230,6 +263,10 @@ final class StreamSession {
             player = nil
         } else {
             dropWebRTC()
+            if audioReady {
+                audioReady = false
+                sound = .unavailable("Sound plays only over a direct (WebRTC) connection; this connection carries the picture only.")
+            }
         }
         onTransport?(t)
     }
@@ -268,6 +305,7 @@ final class StreamSession {
             state = LiveState(status: .connected, width: width, height: height)
             if via == .webSocket { watchWsStats(a) } else { watchStats(a) }
             if takeControl { setControl(true) }
+            if wantSound { sendSound(true) }
             onReady?()
         } else if width != state.width || height != state.height {
             state.width = width
@@ -277,6 +315,7 @@ final class StreamSession {
 
     fileprivate func channelReady(_ a: Int) {
         guard a == attempt else { return }
+        if wantSound { sendSound(true) }
         onReady?()
     }
 
@@ -306,6 +345,7 @@ final class StreamSession {
         case .ended(let message): fail(a, message)
         case .error(let about, let message): Log.error("live view: \(about): \(message)")
         case .cursor(let x, let y): cursor = CGPoint(x: x, y: y)
+        case .audio(let state, let message): soundAnswer(state, message)
         case nil: break
         }
     }
@@ -378,6 +418,43 @@ final class StreamSession {
         loss = 0
         cursor = nil
         modifiers = []
+        audioReady = false
+        sound = .none
+    }
+
+    // MARK: Sound
+
+    /// Turns the office computer's sound on or off. Off stops mobd's capture, not just playback.
+    func setSound(_ on: Bool) {
+        wantSound = on
+        PlaybackAudioDevice.shared.audible = on
+        switch sound {
+        case .none, .unavailable: return
+        default: break
+        }
+        sound = on ? .starting : .off
+        if state.status == .connected { sendSound(on) }
+    }
+
+    private func sendSound(_ on: Bool) {
+        guard audioReady, via == .webRTC, let dc = channels["control"], dc.readyState == .open,
+              let data = try? JSONSerialization.data(withJSONObject: ["t": "audio", "on": on]) else { return }
+        dc.sendData(RTCDataBuffer(data: data, isBinary: false))
+    }
+
+    /// mobd's answer to "audio", or why the sound stopped.
+    private func soundAnswer(_ state: String, _ message: String) {
+        switch state {
+        case "on" where wantSound: sound = .on
+        case "off" where !wantSound: sound = .off
+        case "unavailable", "error":
+            wantSound = false
+            PlaybackAudioDevice.shared.audible = false
+            let why = message.isEmpty ? "The sound stopped." : message
+            sound = state == "error" ? .error(why) : .unavailable(why)
+            Log.error("live view sound: \(why)")
+        default: break
+        }
     }
 
     /// The live view cannot start here (mobd without the `stream` feature); says why.
@@ -386,7 +463,12 @@ final class StreamSession {
         state = LiveState(status: .error, detail: message)
     }
 
-    func disconnect() {
+    /// Ends the live view; the sound choice goes with it unless a reconnect keeps the view open.
+    func disconnect(keepSound: Bool = false) {
+        if !keepSound {
+            wantSound = false
+            PlaybackAudioDevice.shared.audible = false
+        }
         attempt += 1
         teardown()
         if state.status != .idle { state = LiveState(status: .idle, detail: "Disconnected") }
