@@ -5,6 +5,8 @@ import Observation
 final class FileTransferStore {
     private(set) var tasks: [FileTransfer] = []
     private(set) var listing: FileListing?
+    /// The open folder in mobd's shared folder; "" is the shared folder itself.
+    private(set) var path = ""
     var error: String?
     var preparing = false
     var foreground = true
@@ -13,9 +15,13 @@ final class FileTransferStore {
     @ObservationIgnored private var machine = ""
     @ObservationIgnored private var running: [String: Task<Void, Never>] = [:]
     private let root: URL
+    /// Finished downloads; the Files app shows it as On My iPhone › Mob.
+    let downloads: URL
+    private let parallel = 2
 
-    init(directory: URL? = nil) {
+    init(directory: URL? = nil, downloads: URL? = nil) {
         root = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("FileTransfers", isDirectory: true)
+        self.downloads = downloads ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         do {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
             var excluded = root
@@ -24,7 +30,7 @@ final class FileTransferStore {
             let index = root.appendingPathComponent("tasks.json")
             if FileManager.default.fileExists(atPath: index.path) {
                 tasks = try JSONDecoder().decode([FileTransfer].self, from: Data(contentsOf: index))
-                tasks = tasks.filter { UUID(uuidString: $0.id) != nil }.map { var t = $0; if t.state == "running" { t.state = "paused" }; return t }
+                tasks = tasks.filter { UUID(uuidString: $0.id) != nil }.map { var t = $0; if ["running", "queued", "ready"].contains(t.state) { t.state = "paused" }; return t }
             }
         } catch { self.error = readable(error) }
     }
@@ -39,10 +45,17 @@ final class FileTransferStore {
     }
 
     func attach(_ api: APIClient?, machine: String) {
-        pauseAll(); self.api = api; self.machine = machine; listing = nil
+        pauseAll(); self.api = api; self.machine = machine; listing = nil; path = ""
     }
-    func pauseAll() { for task in running.values { task.cancel() } }
-    func pause(_ id: String) { running[id]?.cancel() }
+    func pauseAll() {
+        for task in running.values { task.cancel() }
+        for t in tasks where t.state == "queued" { try? change(t.id) { $0.state = "paused" } }
+    }
+    func pause(_ id: String) {
+        if let work = running[id] { work.cancel() } else { try? change(id) { if $0.state == "queued" { $0.state = "paused" } } }
+    }
+
+    func open(_ path: String) async { self.path = path; listing = nil; await refresh() }
 
     private func checked(_ response: URLResponse, data: Data = Data()) throws -> HTTPURLResponse {
         guard let response = response as? HTTPURLResponse else { throw transferError("Invalid response from mobd") }
@@ -56,15 +69,20 @@ final class FileTransferStore {
     func refresh() async {
         guard let api else { return }
         do {
-            let (data, response) = try await api.session.data(for: api.request(api.url("files")))
+            let path = self.path
+            let (data, response) = try await api.session.data(for: api.request(api.url("files", path.isEmpty ? [:] : ["path": path])))
             _ = try checked(response, data: data)
             let listing = try JSONDecoder().decode(FileListing.self, from: data)
-            if self.api === api { self.listing = listing; self.error = nil }
+            if self.api === api, self.path == path { self.listing = listing; self.error = nil }
         } catch { if self.api === api { self.error = readable(error); onUnauthorized?(error, api) } }
     }
 
+    /// Uploads the picked files into the open folder.
+    func importFiles(_ urls: [URL]) async { for url in urls { await importFile(url) } }
+
     func importFile(_ url: URL) async {
         guard let api else { return }
+        let remotePath = joinRemote(path, url.lastPathComponent)
         let machine = self.machine
         preparing = true
         defer { preparing = false }
@@ -90,7 +108,7 @@ final class FileTransferStore {
                 guard size <= 20 * 1024 * 1024 * 1024 else { throw transferError("Maximum upload size is 20 GiB") }
                 return (Int64(size), try transferDigest(target))
             }.value
-            tasks.append(FileTransfer(id: id, machine: machine, base: api.baseURL.absoluteString, upload: true, name: url.lastPathComponent, size: result.0, sha256: result.1))
+            tasks.append(FileTransfer(id: id, machine: machine, base: api.baseURL.absoluteString, upload: true, name: url.lastPathComponent, size: result.0, sha256: result.1, remotePath: remotePath))
             try persist()
             if self.api === api { start(id) }
         } catch {
@@ -106,18 +124,29 @@ final class FileTransferStore {
         do {
             try FileManager.default.createDirectory(at: folder(id), withIntermediateDirectories: true)
             try Data().write(to: payload(id))
-            tasks.append(FileTransfer(id: id, machine: machine, base: api.baseURL.absoluteString, upload: false, name: file.name, size: file.size, sha256: ""))
+            tasks.append(FileTransfer(id: id, machine: machine, base: api.baseURL.absoluteString, upload: false, name: file.name, size: file.size, sha256: "", remotePath: joinRemote(path, file.name)))
             try persist(); start(id)
         } catch { self.error = readable(error) }
     }
 
+    /// Queues a transfer; at most two run at a time.
     func start(_ id: String) {
-        guard foreground, running[id] == nil, let api, let task = tasks.first(where: { $0.id == id }),
-              task.machine == machine, task.base == api.baseURL.absoluteString,
-              task.state != "ready", task.state != "done" else { return }
+        guard foreground, running[id] == nil, let task = tasks.first(where: { $0.id == id }), task.state != "done" else { return }
+        do { try change(id) { $0.state = "queued"; $0.message = nil } } catch { self.error = readable(error); return }
+        pump()
+    }
+
+    private func pump() {
+        guard foreground, let api else { return }
+        for task in tasks where task.state == "queued" && running[task.id] == nil && running.count < parallel
+            && task.machine == machine && task.base == api.baseURL.absoluteString { run(task, api: api) }
+    }
+
+    private func run(_ task: FileTransfer, api: APIClient) {
+        let id = task.id
         do { try change(id) { $0.state = "running"; $0.message = nil } } catch { self.error = readable(error); return }
         running[id] = Task {
-            defer { running[id] = nil }
+            defer { running[id] = nil; pump() }
             do {
                 if task.upload { try await upload(task, api: api) }
                 else { try await receive(task, api: api) }
@@ -137,7 +166,10 @@ final class FileTransferStore {
             var req = api.request(api.url("file-uploads/"), method: "POST")
             req.setValue("1.0.0", forHTTPHeaderField: "Tus-Resumable")
             req.setValue(String(task.size), forHTTPHeaderField: "Upload-Length")
-            req.setValue("filename \(Data(task.name.utf8).base64EncodedString()),sha256 \(Data(task.sha256.utf8).base64EncodedString())", forHTTPHeaderField: "Upload-Metadata")
+            var metadata = "filename \(Data(task.name.utf8).base64EncodedString()),sha256 \(Data(task.sha256.utf8).base64EncodedString())"
+            // A file in a folder names its place; older mobd takes only a file name at the top.
+            if let rel = task.remotePath, rel.contains("/") { metadata += ",relativePath \(Data(rel.utf8).base64EncodedString())" }
+            req.setValue(metadata, forHTTPHeaderField: "Upload-Metadata")
             let (data, response) = try await api.session.data(for: req)
             let http = try checked(response, data: data)
             guard let location = http.value(forHTTPHeaderField: "Location"), let url = URL(string: location, relativeTo: api.baseURL)?.absoluteURL else { throw transferError("Missing upload location") }
@@ -172,13 +204,16 @@ final class FileTransferStore {
     private func uploaded(_ task: FileTransfer, data: Data) async throws {
         let receipt = try JSONDecoder().decode(FileReceipt.self, from: data)
         guard receipt.sha256 == task.sha256, receipt.size == task.size else { throw transferError("Upload verification failed") }
-        try change(task.id) { $0.state = "done"; $0.bytes = task.size; $0.name = receipt.name; $0.message = nil }
+        try change(task.id) {
+            $0.state = "done"; $0.bytes = task.size; $0.remotePath = receipt.name
+            $0.name = String(receipt.name.split(separator: "/").last ?? Substring(receipt.name)); $0.message = nil; $0.finishedAt = Date()
+        }
         try FileManager.default.removeItem(at: folder(task.id))
         await refresh()
     }
 
     private func receive(_ task: FileTransfer, api: APIClient) async throws {
-        let url = api.url("files").appendingPathComponent(task.name)
+        let url = remoteFileURL(api, task.remotePath ?? task.name)
         var head = api.request(url, method: "HEAD")
         head.timeoutInterval = 600 // The first request hashes the remote file before serving it.
         let (data, response) = try await api.session.data(for: head)
@@ -213,7 +248,9 @@ final class FileTransferStore {
         let digest = try await Task.detached { try transferDigest(local) }.value
         guard digest == sha else { throw transferError("Download checksum mismatch. Cancel and download again.") }
         try Task.checkCancellation()
-        try change(task.id) { $0.state = "ready"; $0.message = nil }
+        let saved = try placeDownload(local, in: downloads, name: task.name)
+        try? FileManager.default.removeItem(at: folder(task.id))
+        try change(task.id) { $0.state = "done"; $0.localPath = saved.path; $0.message = nil; $0.finishedAt = Date() }
     }
 
     func cancel(_ task: FileTransfer) async {
@@ -233,17 +270,30 @@ final class FileTransferStore {
         } catch { self.error = readable(error) }
     }
 
-    func exportURL(_ task: FileTransfer) throws -> URL {
-        guard task.state == "ready", !task.name.contains("/"), !task.name.contains("\\"), task.name != ".", task.name != ".." else { throw transferError("File is not ready to save") }
-        let dir = folder(task.id).appendingPathComponent("export", isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let dest = dir.appendingPathComponent(task.name)
-        if !FileManager.default.fileExists(atPath: dest.path) { try FileManager.default.copyItem(at: payload(task.id), to: dest) }
-        return dest
+    /// Removes a finished transfer from the list.
+    func dismiss(_ id: String) {
+        guard tasks.contains(where: { $0.id == id && $0.state == "done" }) else { return }
+        tasks.removeAll { $0.id == id }; try? persist()
     }
 
-    func saved(_ id: String) {
-        do { try change(id) { $0.state = "done" }; try FileManager.default.removeItem(at: folder(id)) }
-        catch { self.error = readable(error) }
+    func rename(_ name: String, to newName: String) async throws {
+        guard let api else { return }
+        try await remote(remoteFileURL(api, joinRemote(path, name)).appendingPathComponent("rename"), "POST", ["newName": newName])
+    }
+
+    func delete(_ name: String) async throws {
+        guard let api else { return }
+        try await remote(remoteFileURL(api, joinRemote(path, name)), "DELETE")
+    }
+
+    private func remote(_ url: URL, _ method: String, _ body: [String: String]? = nil) async throws {
+        guard let api else { return }
+        var req = api.request(url, method: method)
+        if let body { req.httpBody = try JSONEncoder().encode(body); req.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+        do {
+            let (data, response) = try await api.session.data(for: req)
+            _ = try checked(response, data: data)
+        } catch { onUnauthorized?(error, api); throw error }
+        await refresh()
     }
 }

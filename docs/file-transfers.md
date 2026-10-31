@@ -5,7 +5,13 @@ Implementation branch: `feat/file-transfers`.
 The [shared mobd contract](https://github.com/xrdavies/mobd/blob/feat/file-transfers/docs/file-transfers.md) defines the remote directory,
 tus 1.0 uploads, authenticated Range downloads, completion/checksums and acceptance cases.
 
-The Files tab shows the active machine and uses the system document importer and exporter.
+The Files tab lists the office computer's shared folder (`~/mob-files`): folders first, opened by
+tapping, never above the shared folder. Tapping a file downloads it straight into Mob's Documents
+folder, which the Files app shows as *On My iPhone › Mob* (a name already there gets " (1)"); the
+finished row offers Share. **+** uploads one or more files from the system importer into the open
+folder. Long-press or swipe: Rename and Delete (a folder with everything in it, confirmed), with
+mobd's `fileFolders`. Folders are not uploaded or downloaded as a whole on the phone. At most two
+transfers run at once, shown at the top of the list.
 TUSKit uses a foreground URLSession and bounded upload chunks. Preserve local upload copies,
 SDK task metadata and download partial files across restarts. Pause transfers when the app
 enters the background; returning to the app allows Continue. Continuous background upload

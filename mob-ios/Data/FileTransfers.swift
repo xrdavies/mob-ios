@@ -11,10 +11,41 @@ struct RemoteFile: Codable, Identifiable {
     var id: String { name }
 }
 
+struct RemoteFolder: Codable, Identifiable {
+    let name: String
+    let modified: String
+    var id: String { name }
+}
+
 struct FileListing: Decodable {
     let directory: String
     let maxUploadSize: Int64
     let files: [RemoteFile]
+    /// Present when mobd has fileFolders.
+    let folders: [RemoteFolder]?
+}
+
+/// Paths inside mobd's shared folder are "/"-separated; "" is the folder itself.
+func joinRemote(_ dir: String, _ name: String) -> String { dir.isEmpty ? name : "\(dir)/\(name)" }
+func parentRemote(_ path: String) -> String { path.lastIndex(of: "/").map { String(path[..<$0]) } ?? "" }
+
+/// mobd's URL for a shared path: each segment encoded on its own.
+func remoteFileURL(_ api: APIClient, _ path: String) -> URL {
+    path.split(separator: "/").reduce(api.url("files")) { $0.appendingPathComponent(String($1)) }
+}
+
+/// Moves a verified download into dir, never replacing a file: an existing name gets " (1)", " (2)"…
+func placeDownload(_ source: URL, in dir: URL, name: String) throws -> URL {
+    guard !name.isEmpty, !name.contains("/"), name != ".", name != ".." else { throw transferError("Invalid file name") }
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let ext = (name as NSString).pathExtension, stem = (name as NSString).deletingPathExtension
+    for n in 0..<1000 {
+        let candidate = n == 0 ? name : "\(stem) (\(n))" + (ext.isEmpty ? "" : ".\(ext)")
+        let target = dir.appendingPathComponent(candidate)
+        do { try FileManager.default.moveItem(at: source, to: target); return target }
+        catch CocoaError.fileWriteFileExists { continue }
+    }
+    throw transferError("Too many files with that name")
 }
 
 struct FileTransfer: Codable, Identifiable {
@@ -26,10 +57,16 @@ struct FileTransfer: Codable, Identifiable {
     var size: Int64
     var sha256: String
     var bytes: Int64 = 0
+    /// queued, running, paused, failed or done.
     var state = "paused"
     var uploadURL: URL?
     var etag: String?
     var message: String?
+    /// Where the file is in mobd's shared folder; nil for transfers made before folders.
+    var remotePath: String?
+    /// A finished download: the file in Mob's Documents folder.
+    var localPath: String?
+    var finishedAt: Date?
 }
 
 struct FileReceipt: Decodable { let name: String; let size: Int64; let sha256: String }
