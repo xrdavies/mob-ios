@@ -24,6 +24,11 @@ Same as [mob-android](https://github.com/xrdavies/mob-android):
 - **Setup warnings** from mobd's readiness checks
 - **Live desktop**: see below
 
+## USB redirection (draft)
+
+The [USB scope document](docs/usb-redirection.md) follows the shared Desktop-to-mobd plan.
+USB redirection is not implemented; phone/tablet USB forwarding is outside its first delivery.
+
 ## Live desktop
 
 System audio is not implemented. The [remote audio draft](docs/desktop-audio.md)
