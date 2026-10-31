@@ -219,6 +219,7 @@ private struct StatusChip: View {
         HStack(spacing: 6) {
             Circle().fill(color).frame(width: 7, height: 7)
             Text(label).font(.caption2.weight(.medium)).foregroundStyle(.white)
+                .lineLimit(1).fixedSize()
         }
         .padding(.horizontal, 8).padding(.vertical, 4)
         .background(.black.opacity(0.45), in: Capsule())
