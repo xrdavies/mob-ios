@@ -144,6 +144,7 @@ struct ChatView: View {
                         .font(.caption).foregroundStyle(Color.waiting)
                 }
             }
+            SyncStatusLine()
         }
     }
 
@@ -190,9 +191,11 @@ private struct ChatTimeline: View {
         let pendingQuestion = items.last {
             if case .ask(_, let q) = $0 { return q.isPending } else { return false }
         }?.id
+        let chat = app.chat
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
+                    if chat.hasOlder || chat.olderError != nil { OlderRow() }
                     ForEach(items) { item in
                         TimelineRow(item: item, runner: app.chat.detail?.session.runner, last: item.id == lastFooter).id(item.id)
                     }
@@ -208,6 +211,90 @@ private struct ChatTimeline: View {
             .onChange(of: items) { if atBottom { proxy.scrollTo("bottom", anchor: .bottom) } }
             .onChange(of: outgoing) { if outgoing != nil { proxy.scrollTo("bottom", anchor: .bottom) } }
             .onChange(of: pendingQuestion) { if let pendingQuestion { proxy.scrollTo(pendingQuestion, anchor: .bottom) } }
+            // Older turns were added above: keep the turn that was first where it was.
+            .onChange(of: items.first?.id) { old, _ in
+                if !atBottom, let old, items.contains(where: { $0.id == old }) { proxy.scrollTo(old, anchor: .top) }
+            }
+            .modifier(LoadOlderNearTop(chat: chat))
+        }
+    }
+}
+
+/// Above the oldest shown turn: loading, or why older turns are missing with Retry. On iOS 17 it
+/// also starts the load when it appears.
+private struct OlderRow: View {
+    @Environment(AppState.self) private var app
+
+    var body: some View {
+        let chat = app.chat
+        Group {
+            if chat.olderLoading {
+                ProgressView().frame(maxWidth: .infinity)
+            } else if let error = chat.olderError {
+                HStack(spacing: 4) {
+                    Text(error)
+                    Button("Retry") { chat.loadOlder() }
+                }
+                .font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity)
+            } else {
+                Color.clear.frame(height: 1).onAppear {
+                    if #unavailable(iOS 18.0) { chat.loadOlder() }
+                }
+            }
+        }
+        .id("older")
+    }
+}
+
+/// iOS 18: loads older turns when the timeline is scrolled near its top. After they are added the
+/// position is restored lower down, so one scroll loads one page.
+private struct LoadOlderNearTop: ViewModifier {
+    let chat: ChatStore
+    @State private var nearTop = false
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content
+                .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top < 400 } action: { _, near in
+                    nearTop = near
+                    if near { chat.loadOlder() }
+                }
+                .onChange(of: chat.olderLoading) { if !chat.olderLoading, nearTop { chat.loadOlder() } }
+        } else {
+            content
+        }
+    }
+}
+
+/// Under the title: syncing (after 300 ms, so a fast sync shows nothing), offline, or failed with Retry.
+private struct SyncStatusLine: View {
+    @Environment(AppState.self) private var app
+    @State private var late = false
+
+    var body: some View {
+        let chat = app.chat
+        Group {
+            switch chat.sync {
+            case .syncing where late:
+                HStack(spacing: 4) {
+                    ProgressView().controlSize(.mini)
+                    Text("Syncing…")
+                }
+            case .offline:
+                Text("Offline · showing saved copy")
+            case .failed:
+                Button("Couldn't sync · Retry") { chat.resync() }
+            default:
+                EmptyView()
+            }
+        }
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+        .task(id: chat.sync) {
+            late = false
+            guard chat.sync == .syncing else { return }
+            try? await Task.sleep(for: .milliseconds(300))
+            late = !Task.isCancelled
         }
     }
 }

@@ -14,6 +14,13 @@ struct APIError: LocalizedError {
 
 extension Error {
     var isUnauthorized: Bool { (self as? APIError)?.isUnauthorized == true }
+
+    /// mobd could not be reached at all (no network, the office computer asleep or off).
+    var isUnreachable: Bool {
+        guard let e = self as? URLError else { return false }
+        return [.notConnectedToInternet, .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed, .timedOut,
+                .networkConnectionLost, .dataNotAllowed, .internationalRoamingOff].contains(e.code)
+    }
 }
 
 /// A readable message for any request failure.
@@ -179,6 +186,11 @@ final class APIClient {
     /// With `since`, mobd may answer only the turns changed after that revision (see ChatDetail.merged).
     func session(_ id: String, since: Int64? = nil) async throws -> SessionDetail {
         try await get("sessions/\(id)", query: since.map { ["since": String($0)] } ?? [:])
+    }
+
+    /// A page of whole turns (`limit`, `before`) or the changes `since` a revision (mobd with "sessionHistory").
+    func history(_ id: String, _ query: [String: String]) async throws -> SessionDetail {
+        try await get("sessions/\(id)/history", query: query)
     }
 
     /// model / effort set the conversation's settings; "" returns to the machine default.

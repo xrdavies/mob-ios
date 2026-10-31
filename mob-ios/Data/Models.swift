@@ -114,6 +114,10 @@ struct AgentTask: Codable, Identifiable, Hashable {
     var queueReason: String?
     /// True while the turn waits for the user to answer a question.
     var waiting: Bool?
+    /// The conversation revision of this turn's last change (mobd with "sessionHistory").
+    var rev: Int64?
+    /// The turn's 1-based position in its conversation; it never changes.
+    var seq: Int64?
 
     var modelLabel: String {
         guard let model, !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return "Default model (not reported)" }
@@ -304,6 +308,11 @@ struct SessionDetail: Codable {
     var rev: Int64? = nil
     /// False when this answers `since` with only the turns changed after it.
     var full: Bool? = nil
+    /// GET /sessions/{id}/history: older turns exist, and `before` fetches the page before this one.
+    var hasMore: Bool? = nil
+    var before: String? = nil
+    /// GET /sessions/{id}/history?since=: mobd could not answer; load the newest page again.
+    var reset: Bool? = nil
 }
 
 struct Upload: Codable {
