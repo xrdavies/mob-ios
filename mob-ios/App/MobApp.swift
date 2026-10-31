@@ -24,6 +24,7 @@ struct MobApp: App {
         .onChange(of: phase) { _, now in
             appState.foreground = now == .active
             appState.files.foreground = now == .active
+            if now == .active { appState.chat.resync() }
             if now == .background {
                 appState.files.pauseAll()
                 MobApp.scheduleRefresh()

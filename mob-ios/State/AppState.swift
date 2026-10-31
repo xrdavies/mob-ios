@@ -121,7 +121,7 @@ final class AppState: MachineEvents {
         isConnected = false
         healthError = nil
         // An unpaired machine gets no requests until it is paired again.
-        chat.attach(m == nil || m?.needsPairing == true ? nil : apiClient, machine: m?.id ?? "")
+        chat.attach(m == nil || m?.needsPairing == true ? nil : apiClient, machine: m?.id ?? "", historyKey: m?.serverId)
         desktops.attach(m == nil || m?.needsPairing == true ? nil : apiClient)
         files.attach(m == nil || m?.needsPairing == true ? nil : apiClient, machine: m?.id ?? "")
         chat.live = m.map { liveMachines.contains($0.id) } ?? false
@@ -216,6 +216,8 @@ final class AppState: MachineEvents {
         guard let i = machines.firstIndex(where: { $0.id == id }), !machines[i].needsPairing else { return }
         Log.error("\(machines[i].name): mobd refused this device, pair again")
         machines[i].needsPairing = true
+        // Revoked: the conversations saved from this machine go too.
+        chat.forget(historyKey: machines[i].serverId ?? id)
         saveMachines()
         if id == activeMachineId { activate() }
         syncWatchers()
@@ -232,6 +234,7 @@ final class AppState: MachineEvents {
         for a in m.addresses { Keychain.delete(a.tokenAccount) }
         waiting[m.id] = nil
         defaults.removeObject(forKey: "session.\(m.id)")
+        chat.forget(historyKey: m.serverId ?? m.id)
         if m.id == activeMachineId {
             activeMachineId = machines.first?.id
             activate()

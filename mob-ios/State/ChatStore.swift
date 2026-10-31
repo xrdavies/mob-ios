@@ -36,6 +36,58 @@ struct ChatDetail: Equatable {
     }
 }
 
+// In an extension, so the memberwise initializer stays.
+extension ChatDetail {
+    /// Saved turns as a conversation, with `session`'s metadata.
+    init(session: Session, turns: [StoredTurn], rev: Int64?) {
+        var session = session
+        session.messages = turns.flatMap(\.messages)
+        self.init(session: session, tasks: turns.map(\.task), activities: turns.flatMap(\.activities),
+                  questions: turns.flatMap(\.questions), rev: rev)
+    }
+
+    /// The turns (all, or those named), in order.
+    func turns(_ ids: Set<String>? = nil) -> [StoredTurn] {
+        let messages = Dictionary(grouping: session.messages ?? [], by: \.taskId)
+        let activities = Dictionary(grouping: self.activities, by: \.taskId)
+        let questions = Dictionary(grouping: self.questions, by: \.taskId)
+        return tasks.filter { ids?.contains($0.id) ?? true }.map {
+            StoredTurn(task: $0, messages: messages[$0.id] ?? [], activities: activities[$0.id] ?? [], questions: questions[$0.id] ?? [])
+        }
+    }
+
+    var oldestSeq: Int64? { tasks.compactMap(\.seq).min() }
+
+    /// `d`'s turns merged into `base` by task ID, keeping the copy with the higher `rev`. A turn not
+    /// held yet joins only when its `seq` is at least `from`, so a changed turn older than the held
+    /// range never lands at the end as `current`. Ordered by `seq`; metadata from `d`, revision from `base`.
+    static func mergedTurns(_ d: ChatDetail, onto base: ChatDetail?, from: Int64) -> ChatDetail {
+        let held = Dictionary((base?.tasks ?? []).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let fresh = Set(d.tasks.filter { t in
+            if let old = held[t.id] { return (old.rev ?? 0) <= (t.rev ?? 0) }
+            return (t.seq ?? from) >= from
+        }.map(\.id))
+        let mine = base?.turns().filter { !fresh.contains($0.task.id) } ?? []
+        let turns = (mine + d.turns(fresh)).sorted { ($0.task.seq ?? 0) < ($1.task.seq ?? 0) }
+        return ChatDetail(session: d.session, turns: turns, rev: base?.rev)
+    }
+}
+
+/// Whether the open conversation is in step with mobd (see docs/conversation-history.md).
+enum SyncState {
+    case none, syncing, offline, failed
+}
+
+/// A sync result before it is applied: the conversation to show and the turns to save.
+private struct Synced {
+    var detail: ChatDetail
+    var turns: [StoredTurn]
+    var cursors: [String: String]
+    var replace: Bool
+    var storedFrom: Int64?
+    var before: String?
+}
+
 /// Chats on the active machine: the list, the open conversation, and every action on them.
 /// One instance lives in AppState; `attach` points it at another machine.
 @MainActor @Observable
@@ -58,6 +110,9 @@ final class ChatStore {
     private(set) var cancelling = false
     /// Last failure, shown once by the UI and then cleared.
     var error: String?
+    private(set) var sync: SyncState = .none
+    private(set) var olderLoading = false
+    private(set) var olderError: String?
     /// True while the machine's global event stream is connected; polling then only backs it up.
     @ObservationIgnored var live = false
     /// mobd refused the token of this machine; AppState marks it for pairing and detaches.
@@ -76,10 +131,33 @@ final class ChatStore {
     /// Recently opened conversations on this machine, most recent last: reopening one shows it
     /// at once and fetches only what changed.
     @ObservationIgnored private var cache: [ChatDetail] = []
+    /// The local copy, keyed by `historyKey` (the machine's serverId, so every address shares one).
+    @ObservationIgnored private let history: HistoryStore
+    @ObservationIgnored private var historyKey = ""
+    /// mobd serves paged history ("sessionHistory"); nil until /health answers. Only then is the
+    /// local copy used.
+    @ObservationIgnored private var paged: Bool?
+    /// The open conversation's oldest saved turn, and mobd's cursor for the page before it.
+    @ObservationIgnored private var storedFrom: Int64?
+    @ObservationIgnored private var before: String?
+    @ObservationIgnored private var saveTimer: Task<Void, Never>?
+    @ObservationIgnored private var writes: Task<Void, Never>?
+
+    /// Turns per history page, from mobd or the local copy.
+    static let page = 20
 
     private var key: String { "session.\(machineId)" }
 
-    func attach(_ client: APIClient?, machine: String) {
+    init(history: HistoryStore = .shared) {
+        self.history = history
+    }
+
+    /// Turns before the oldest shown one exist, saved or on mobd.
+    var hasOlder: Bool { paged == true && (detail?.tasks.first?.seq ?? 1) > 1 }
+
+    /// `historyKey` names the machine's local copy: its serverId from pairing, else the machine ID.
+    func attach(_ client: APIClient?, machine: String, historyKey: String? = nil) {
+        if saveTimer != nil { saveCurrent() }
         generation += 1
         selection += 1
         poll?.cancel()
@@ -98,6 +176,9 @@ final class ChatStore {
         loading = false
         cancelling = false
         error = nil
+        sync = .none
+        paged = nil
+        self.historyKey = historyKey ?? machine
         guard client != nil else { return }
         let gen = generation
         listPoll = Task { [weak self] in
@@ -136,7 +217,12 @@ final class ChatStore {
         let gen = generation
         do {
             let list = try await client.sessions()
-            if gen == generation { sessions = list }
+            if gen == generation {
+                sessions = list
+                if sync == .offline, currentId == nil { sync = .none }
+                // Conversations deleted while this device was away leave the local copy too.
+                if paged == true { enqueue { [key = historyKey] in await $0.prune(machine: key, keeping: Set(list.map(\.id))) } }
+            }
             if archived != nil {
                 let arch = try await client.sessions(archived: "true")
                 if gen == generation { archived = arch }
@@ -144,6 +230,12 @@ final class ChatStore {
         } catch {
             // The health check reports connection problems; the list keeps its last state.
             _ = unauthorized(error, gen)
+            // Unreachable from the start: the conversations saved on this device can still be read.
+            guard error.isUnreachable, gen == generation, sessions.isEmpty else { return }
+            let saved = await history.list(machine: historyKey)
+            guard gen == generation, sessions.isEmpty, !saved.isEmpty else { return }
+            sessions = saved.sorted { ($0.updatedAt ?? "") > ($1.updatedAt ?? "") }
+            if currentId == nil { sync = .offline }
         }
     }
 
@@ -158,9 +250,16 @@ final class ChatStore {
     func open(_ id: String?) {
         let changed = id != currentId
         if changed { selection += 1 }
+        if saveTimer != nil { saveCurrent() }
         currentId = id
         defer { if changed { onOpen?() } }
-        detail = cache.last { $0.session.id == id }
+        // With paged history the local copy replaces the memory cache.
+        detail = paged == true ? nil : cache.last { $0.session.id == id }
+        storedFrom = nil
+        before = nil
+        olderLoading = false
+        olderError = nil
+        if sync != .offline { sync = .none }
         cancelling = false
         UserDefaults.standard.set(id, forKey: key)
         poll?.cancel()
@@ -171,7 +270,8 @@ final class ChatStore {
     }
 
     /// Fetches the open conversation now and keeps refreshing it (fast while a turn runs).
-    private func follow(_ id: String) {
+    /// `indicate` shows "Syncing…" (returning to the app, reconnecting); routine polls show nothing.
+    private func follow(_ id: String, indicate: Bool = false) {
         poll?.cancel()
         guard let client = api else { return }
         let gen = generation
@@ -179,24 +279,53 @@ final class ChatStore {
             var first = true
             while let self, !Task.isCancelled, gen == self.generation, self.currentId == id {
                 do {
-                    let d = try await client.session(id, since: self.detail?.rev)
+                    if self.paged == nil { self.paged = (try? await client.health())?.supports("sessionHistory") }
+                    if first, self.paged != false, self.detail == nil {
+                        // The saved copy shows at once; then only what changed since it is fetched.
+                        let saved = await self.history.load(machine: self.historyKey, id: id, limit: Self.page)
+                        guard !Task.isCancelled, gen == self.generation, self.currentId == id else { break }
+                        if let saved, !saved.turns.isEmpty, self.detail == nil {
+                            self.detail = ChatDetail(session: saved.session, turns: saved.turns, rev: saved.syncRev == 0 ? nil : saved.syncRev)
+                            self.storedFrom = saved.oldest
+                            self.before = saved.cursor
+                            // Saved by a mobd with paged history, so it is one even while /health does not answer.
+                            self.paged = self.paged ?? true
+                            self.loading = false
+                        }
+                    }
+                    if first, self.paged == true, indicate || self.detail != nil { self.sync = .syncing }
+                    let fresh: ChatDetail
+                    var synced: Synced?
+                    if self.paged == true {
+                        synced = try await self.fetchHistory(client, id)
+                        fresh = synced!.detail
+                    } else {
+                        let d = try await client.session(id, since: self.detail?.rev)
+                        guard !Task.isCancelled, gen == self.generation, self.currentId == id else { break }
+                        fresh = ChatDetail.merged(d, onto: self.detail)
+                    }
                     guard !Task.isCancelled, gen == self.generation, self.currentId == id else { break }
-                    let fresh = ChatDetail.merged(d, onto: self.detail)
                     // A snapshot fetched before newer stream events must not replace them.
                     let shown = self.detail
                     let stale = shown != nil && shown?.current?.id == fresh.current?.id && fresh.busy &&
                         (fresh.current?.eventId ?? 0) < (shown?.current?.eventId ?? 0)
-                    if !stale { self.detail = fresh }
+                    if let synced, !stale { self.apply(synced) }
+                    else if !stale { self.detail = fresh }
+                    if self.sync != .none { self.sync = .none }
                     if self.detail?.busy != true { self.cancelling = false }
                     self.followTurn(client, gen)
                 } catch {
-                    if Task.isCancelled || self.unauthorized(error, gen) { break }
-                    if first, (error as? APIError)?.status == 404 {
+                    if Task.isCancelled || error is CancellationError || self.unauthorized(error, gen) { break }
+                    if (first || self.paged == true), (error as? APIError)?.status == 404 {
                         // The saved chat was deleted elsewhere.
                         if gen == self.generation { self.remove(id) }
                         break
                     }
-                    if first, gen == self.generation { self.error = readable(error) }
+                    if self.paged == true, self.detail != nil, gen == self.generation {
+                        // The saved copy stays readable; the status says why it may be behind.
+                        self.sync = error.isUnreachable ? .offline : .failed
+                        Log.error("sync failed: \(readable(error))")
+                    } else if first, gen == self.generation { self.error = readable(error) }
                 }
                 if first { self.loading = false }
                 first = false
@@ -213,7 +342,128 @@ final class ChatStore {
     }
 
     /// Re-reads the open conversation now (after an action) without clearing it.
-    private func reload() { if let id = currentId { follow(id) } }
+    private func reload(indicate: Bool = false) { if let id = currentId { follow(id, indicate: indicate) } }
+
+    /// Returning to the app: catches up with what changed meanwhile, showing "Syncing…".
+    func resync() {
+        guard paged == true, sync != .syncing else { return }
+        refreshSessions()
+        reload(indicate: true)
+    }
+
+    /// What changed since the saved revision, merged into the open conversation; without a saved
+    /// copy, or when mobd answers `reset`, the newest page replaces it.
+    private func fetchHistory(_ client: APIClient, _ id: String) async throws -> Synced {
+        if let rev = detail?.rev, detail?.tasks.isEmpty == false {
+            let d = try await client.history(id, ["since": String(rev), "limit": "50"])
+            guard currentId == id, let held = detail else { throw CancellationError() }
+            if d.reset != true {
+                let changes = ChatDetail.merged(d, onto: nil)
+                let from = held.tasks.first?.seq ?? 0
+                var merged = ChatDetail.mergedTurns(changes, onto: held, from: from)
+                merged.rev = d.rev
+                // A changed turn inside the saved range is saved even when it is not shown yet.
+                let low = storedFrom ?? from
+                let ids = Set(changes.tasks.filter { ($0.seq ?? low) >= low }.map(\.id))
+                return Synced(detail: merged, turns: changes.turns(ids), cursors: [:], replace: false, storedFrom: storedFrom ?? from, before: before)
+            }
+            Log.add("history reset by mobd; loading the newest page")
+        }
+        let page = try await client.history(id, ["limit": String(Self.page)])
+        let fresh = ChatDetail.merged(page, onto: nil)
+        var cursors: [String: String] = [:]
+        if let b = page.before, let first = fresh.tasks.first { cursors[first.id] = b }
+        return Synced(detail: fresh, turns: fresh.turns(), cursors: cursors, replace: true, storedFrom: fresh.oldestSeq, before: page.before)
+    }
+
+    private func apply(_ s: Synced) {
+        detail = s.detail
+        storedFrom = s.storedFrom
+        before = s.before
+        // A running turn is saved every few seconds, not on every poll.
+        let running = Set(s.turns.filter { Status.busy($0.task.status) }.map(\.task.id))
+        save(s.turns.filter { !running.contains($0.task.id) }, cursors: s.cursors, replace: s.replace)
+        if !running.isEmpty { saveSoon() }
+    }
+
+    /// Loads the turns before the oldest shown one: from the local copy, else from mobd.
+    func loadOlder() {
+        guard hasOlder, !olderLoading, let shown = detail, let from = shown.tasks.first?.seq else { return }
+        let id = shown.session.id
+        let gen = generation
+        olderLoading = true
+        olderError = nil
+        Task {
+            defer { if gen == generation, currentId == id { olderLoading = false } }
+            var page: ChatDetail?
+            if let stored = storedFrom, stored < from,
+               let saved = await history.load(machine: historyKey, id: id, before: from, limit: Self.page), !saved.turns.isEmpty {
+                page = ChatDetail(session: shown.session, turns: saved.turns, rev: nil)
+            }
+            do {
+                if page == nil {
+                    guard let cursor = before, let client = api else { throw APIError(message: "mobd gave no cursor for older messages", status: nil) }
+                    let answer = try await client.history(id, ["before": cursor, "limit": String(Self.page)])
+                    guard gen == generation, currentId == id else { return }
+                    let fresh = ChatDetail.merged(answer, onto: nil)
+                    storedFrom = fresh.oldestSeq
+                    before = answer.before
+                    var cursors: [String: String] = [:]
+                    if let b = answer.before, let first = fresh.tasks.first { cursors[first.id] = b }
+                    page = fresh
+                    save(fresh.turns(), cursors: cursors)
+                }
+                guard gen == generation, currentId == id, let page, let current = detail else { return }
+                // Older pages never move the sync baseline or the session metadata.
+                var merged = ChatDetail.mergedTurns(page, onto: current, from: page.oldestSeq ?? from)
+                let messages = merged.session.messages
+                merged.session = current.session
+                merged.session.messages = messages
+                detail = merged
+            } catch {
+                guard gen == generation, currentId == id else { return }
+                Log.error("loading older turns failed: \(readable(error))")
+                olderError = error.isUnreachable ? "Older messages aren't available offline" : "Couldn't load older messages"
+            }
+        }
+    }
+
+    /// Runs `write` on the local copy after the writes before it.
+    private func enqueue(_ write: @escaping @Sendable (HistoryStore) async -> Void) {
+        let previous = writes
+        let history = history
+        writes = Task {
+            await previous?.value
+            await write(history)
+        }
+    }
+
+    /// Saves `turns` and the session row of the open conversation.
+    private func save(_ turns: [StoredTurn], cursors: [String: String] = [:], replace: Bool = false) {
+        guard paged == true, let d = detail, !turns.isEmpty || replace else { return }
+        let key = historyKey, session = d.session, rev = d.rev ?? 0
+        let keep = [session.id] + sessions.filter { Status.busy($0.status) }.map(\.id)
+        enqueue { await $0.save(machine: key, session: session, syncRev: rev, turns: turns, cursors: cursors, replace: replace, keep: keep) }
+    }
+
+    /// Saves the current turn now (it finished, or the conversation is left).
+    private func saveCurrent() {
+        saveTimer?.cancel()
+        saveTimer = nil
+        guard let d = detail, let t = d.current else { return }
+        save(d.turns([t.id]))
+    }
+
+    /// While a turn runs, saves it at most every 5 seconds rather than per event.
+    private func saveSoon() {
+        guard paged == true, saveTimer == nil, let id = currentId else { return }
+        saveTimer = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(5))
+            guard let self, !Task.isCancelled, self.currentId == id else { return }
+            self.saveTimer = nil
+            self.saveCurrent()
+        }
+    }
 
     private func stopStream() {
         stream?.cancel()
@@ -289,6 +539,7 @@ final class ChatStore {
         }
         d.tasks[d.tasks.count - 1] = t
         detail = d
+        if Status.terminal(t.status) { saveCurrent() } else { saveSoon() }
         if Status.terminal(ev.status) {
             cancelling = false
             stopStream()
@@ -328,7 +579,21 @@ final class ChatStore {
         if newTurn || (stream == nil && s.status != current?.status) { reload() }
     }
 
+    /// Deletes a machine's local copy (the machine was removed, or mobd no longer accepts this device).
+    func forget(historyKey key: String) {
+        enqueue { await $0.remove(machine: key) }
+    }
+
+    /// The local copy's size, and clearing it (Settings).
+    func savedSize() async -> Int64 { await history.size() }
+
+    func clearSaved() async {
+        await writes?.value
+        await history.clear()
+    }
+
     func remove(_ id: String) {
+        enqueue { [key = historyKey] in await $0.remove(machine: key, id: id) }
         cache.removeAll { $0.session.id == id }
         sessions.removeAll { $0.id == id }
         archived?.removeAll { $0.id == id }
@@ -338,7 +603,7 @@ final class ChatStore {
     /// After a stream reconnect: refetch everything.
     func refreshAll() {
         refreshSessions()
-        reload()
+        reload(indicate: true)
     }
 
     // MARK: - Actions

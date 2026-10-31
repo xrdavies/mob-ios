@@ -65,6 +65,7 @@ struct SettingsView: View {
                 } footer: {
                     Text("Mob notifies you when the agent asks something or a task finishes, on every office computer in the list. While Mob is open this is immediate. In the background iOS does not allow a live connection, so Mob checks when iOS lets it refresh, usually every 15 minutes or more.")
                 }
+                SavedConversationsSection()
                 Section {
                     NavigationLink("Log") { LogView() }
                 } footer: {
@@ -424,5 +425,32 @@ struct PairingSheet: View {
                 self.error = readable(error)
             }
         }
+    }
+}
+
+/// The local copy of conversations (docs/conversation-history.md): its size, and clearing it.
+private struct SavedConversationsSection: View {
+    @Environment(AppState.self) private var app
+    @State private var size: Int64?
+    @State private var clearing = false
+
+    var body: some View {
+        Section {
+            LabeledContent("Space used", value: size.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "…")
+            Button("Clear local copy", role: .destructive) {
+                clearing = true
+                Task {
+                    await app.chat.clearSaved()
+                    size = await app.chat.savedSize()
+                    clearing = false
+                }
+            }
+            .disabled(clearing || size == 0)
+        } header: {
+            Text("Saved conversations")
+        } footer: {
+            Text("Conversations you open are saved on this device, so they show at once and can be read while the office computer is unreachable. Up to 500 MB; the least recently opened are removed first.")
+        }
+        .task { size = await app.chat.savedSize() }
     }
 }
