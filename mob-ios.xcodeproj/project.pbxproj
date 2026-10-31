@@ -7,8 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A100000000000000000000B2 /* TUSKit in Frameworks */ = {isa = PBXBuildFile; productRef = A100000000000000000000B1 /* TUSKit */; };
 		A100000000000000000000A2 /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = A100000000000000000000A1 /* WebRTC */; };
+		A100000000000000000000B2 /* TUSKit in Frameworks */ = {isa = PBXBuildFile; productRef = A100000000000000000000B1 /* TUSKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -492,11 +492,6 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-        A100000000000000000000B0 /* XCRemoteSwiftPackageReference "TUSKit" */ = {
-            isa = XCRemoteSwiftPackageReference;
-            repositoryURL = "https://github.com/tus/TUSKit.git";
-            requirement = { kind = exactVersion; version = 3.7.1; };
-        };
 		A100000000000000000000A0 /* XCRemoteSwiftPackageReference "WebRTC" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/stasel/WebRTC.git";
@@ -505,18 +500,26 @@
 				version = 155.0.0;
 			};
 		};
+		A100000000000000000000B0 /* XCRemoteSwiftPackageReference "TUSKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/tus/TUSKit.git";
+			requirement = {
+				kind = exactVersion;
+				version = 3.7.1;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-        A100000000000000000000B1 /* TUSKit */ = {
-            isa = XCSwiftPackageProductDependency;
-            package = A100000000000000000000B0 /* XCRemoteSwiftPackageReference "TUSKit" */;
-            productName = TUSKit;
-        };
 		A100000000000000000000A1 /* WebRTC */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = A100000000000000000000A0 /* XCRemoteSwiftPackageReference "WebRTC" */;
 			productName = WebRTC;
+		};
+		A100000000000000000000B1 /* TUSKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A100000000000000000000B0 /* XCRemoteSwiftPackageReference "TUSKit" */;
+			productName = TUSKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
