@@ -1,57 +1,82 @@
-# Conversation history pagination and incremental sync
+# Conversation history: local copy and paging (iOS)
 
-Status: draft
+Status: planned on `feat/conversation-history`
 
-The iOS client should adopt the mobd history-page contract while keeping
-revision sync as the source of truth for live changes. See the shared protocol
-draft in [mobd](https://github.com/xrdavies/mobd/blob/main/docs/conversation-history.md).
+Mob Mobile for iPhone and iPad keeps a local copy of each conversation and loads older turns as
+you scroll. The protocol is in
+[mobd](https://github.com/xrdavies/mobd/blob/main/docs/conversation-history.md):
+`GET /sessions/{id}/history` for pages and bounded changes, `seq` for turn order, `sessionHistory`
+in `/health`. Without that feature the app keeps today's full-snapshot request.
 
-## API and state
+## Local copy
 
-Extend `APIClient` with a history-page request:
+SQLite through the system `libsqlite3`, in `history.sqlite` under Application Support, excluded
+from backup, with file protection `completeUntilFirstUserAuthentication`. Tables:
 
-```text
-GET /sessions/{id}/history?limit=50
-GET /sessions/{id}/history?before=<cursor>&limit=50
-```
+- `turns`: one row per turn (machine, conversation, task ID, `seq`, `rev`, size) holding the JSON
+  of the turn with its messages, steps and questions;
+- `conversations`: the session row, `syncRev`, oldest `seq` held, whether older turns exist, last
+  opened time and stored size;
+- `meta`: the schema version.
 
-`ChatStore` keeps `syncRev`, `historyBefore`, `historyHasMore`, and an
-in-flight page flag per open session. The first open loads the newest page and
-uses its `snapshotRev` as the initial revision baseline. Refreshes and SSE
-recovery continue to call `session(_:since:)`; older-page responses do not
-advance `syncRev`.
+Rows are keyed by the machine's `serverId` from pairing (the local machine ID when absent). A
+corrupt file or a different schema version is deleted and rebuilt from mobd.
 
-Tasks remain the merge unit. A revision response replaces the returned task and
-all related messages, activities and questions. A page response inserts older
-tasks by ID. If a revision update arrives for a task outside the loaded range,
-keep it in the detail store so a later page cannot replace it with stale data.
+`ChatStore` writes through one serial queue: when a turn finishes, and at most every 5 seconds
+while one runs, never for each streamed event. It replaces today's eight-conversation memory
+cache.
 
-When the server lacks `sessionHistoryPaging`, use the current full-session
-request. Existing cached-session behavior remains valid during rollout.
+## Opening a conversation
 
-## SwiftUI timeline behavior
+1. Show the saved turns at once, if any.
+2. Sync: with a saved copy, `since=<syncRev>`; without one, the newest page. A `reset` answer drops
+   the saved turns and loads the newest page. The existing polling and stream recovery use the
+   same `since` request.
+3. Scrolling near the top of `ChatTimeline` loads the page before the oldest held turn.
 
-`ChatTimeline` should detect that the scroll view is near its top and ask the
-store to load the next older page. Use a stable first-visible `TimelineItem`
-ID and its geometry to restore the scroll position after prepending rows. The
-user must see the same content after a page loads.
+Merging is by task ID, keeping the higher `rev` (the `AgentTask` model gains `seq` and `rev`).
+Only turns from the oldest held `seq` up are shown; a changed turn older than that is stored but
+not added to the end, so it can never become `current`.
 
-Keep the existing bottom-follow behavior for live output. A top-page load must
-not scroll to the bottom, clear an unseen-output state, or start a second page
-request. Show a compact loading row at the top and leave the cursor unchanged
-when a request fails so the user can retry.
+## Sync status
 
-## Cache and lifecycle
+| State | Shown |
+|---|---|
+| Opening a saved chat, returning to the foreground, reconnecting | Spinner and **Syncing…** under the title |
+| Up to date | Nothing |
+| mobd unreachable | **Offline · showing saved copy** |
+| Sync failed while online | **Couldn't sync · Retry** |
+| Loading older turns | Spinner row at the top |
+| Older turns not saved, offline | **Older messages aren't available offline** |
 
-The existing eight-session in-memory cache can retain loaded pages, cursors and
-the revision baseline. It is cleared with the current machine attachment and
-does not become persistent storage in this draft. Background transitions keep
-the loaded history; returning to the foreground reconciles through
-`session(_:since:)` before resuming live output.
+The status appears only after about 300 ms, and routine polls show nothing unless they fail; a
+running turn keeps its live status. Reading and sending continue while syncing. Offline, saved
+conversations can be read; sending is disabled and images not cached show a placeholder.
+
+## Timeline
+
+Keep the visible turn in place when older turns are prepended with iOS 17's
+`scrollPosition(id:)` on the `LazyVStack`. A page load must not scroll to the bottom, clear the
+unseen-output state or start a second request; an error leaves the cursor unchanged with Retry.
+
+## Storage limit
+
+At most 500 MB. Above it, the app removes the saved turns of the least recently opened
+conversation, then the next, until it is under about 450 MB. A single conversation over the limit
+keeps its newest turns and loses its oldest. The open conversation and any with a running turn are
+never trimmed (the open one is trimmed when left). Conversations stay in the chat list.
+
+Settings shows the space used and **Clear local copy**.
+
+## Removal
+
+- `session.deleted`, a `404`, or a conversation missing from the list after being offline:
+  delete it locally.
+- Removing a machine, or mobd revoking this device: delete that machine's copy.
 
 ## Verification
 
-Add tests for the API decoder, first-page and older-page merges, duplicate task
-IDs, an old-task update received after paging, and full-snapshot fallback.
-Exercise a SwiftUI scroll test that prepends rows without changing the first
-visible item, plus an SSE reconnect test that reconciles through `since`.
+Unit tests: decoding, first and older pages, duplicate task IDs, an old turn changed after paging
+is not appended, `reset`, full-snapshot fallback, eviction order, trimming, a corrupt database
+rebuilt. Against a local mobd: relaunch shows the saved copy before the network answers; scrolling
+up loads older turns without moving the visible one.
