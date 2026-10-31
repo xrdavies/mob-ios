@@ -265,7 +265,7 @@ final class StreamSession {
             dropWebRTC()
             if audioReady {
                 audioReady = false
-                sound = .unavailable("Sound needs a direct connection; it is not available over the WebSocket yet.")
+                sound = .unavailable("Sound plays only over a direct (WebRTC) connection; this connection carries the picture only.")
             }
         }
         onTransport?(t)

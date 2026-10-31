@@ -1,6 +1,6 @@
 # Remote desktop audio (iOS)
 
-Status: stage 1 (WebRTC) implemented on `feat/remote-audio`; WebSocket audio planned (stage 2).
+Status: implemented on `feat/remote-audio` (WebRTC). No sound over the WebSocket fallback, by decision.
 
 You hear the office computer's sound in the live view on iPhone and iPad. The protocol, stages
 and capture are in [mobd's desktop audio doc](https://github.com/xrdavies/mobd/blob/main/docs/desktop-audio.md):
@@ -34,7 +34,7 @@ replaces it (`RTCPeerConnectionFactory(…, audioDevice:)`):
 - The answer's `audio` sets `sound`: `.off`, or `.unavailable(reason)`.
 - `setSound(_:)` sends the control message and tells the audio device.
 - mobd's `audio` messages move it to `.on`, `.unavailable` or `.error`.
-- Over the WebSocket, sound is unavailable until stage 2.
+- Over the WebSocket, sound is unavailable by decision (mobd's doc: sound that stutters is worse than none).
 
 Turning sound on and off:
 
@@ -58,8 +58,3 @@ why.
 Still to check on a physical iPhone and iPad: no microphone indicator, built-in, wired and
 Bluetooth output, calls and Siri, the silent switch, and audible delay. The simulator does not
 show real routing or latency.
-
-## Stage 2 (planned)
-
-WebSocket audio frames (type `2`), decoded with AudioConverter (iOS decodes Opus itself) and
-scheduled on the same engine with about 60 ms of buffer; video keeps its current timing.
