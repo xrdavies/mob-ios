@@ -54,6 +54,7 @@ struct DesktopThumbnail: View {
             .accessibilityElement(children: .ignore)
             .accessibilityAddTraits(.isButton)
             .accessibilityLabel("Office desktop. Opens full screen.")
+            .overlay(alignment: .bottomTrailing) { SoundButton(compact: true).padding(8) }
             .modifier(RetainDesktop())
             .padding(.horizontal, 12).padding(.vertical, 8)
             .id(ObjectIdentifier(app.apiClient))
@@ -224,6 +225,51 @@ private struct StatusChip: View {
     }
 }
 
+/// The office computer's sound: off until tapped (mobd with streamAudio, docs/desktop-audio.md).
+/// Hidden where mobd cannot share it; unavailable shows why.
+private struct SoundButton: View {
+    @Environment(AppState.self) private var app
+    let compact: Bool
+    @State private var why: String?
+
+    var body: some View {
+        let stream = app.stream
+        let sound = stream.sound
+        let live = app.liveState.status == .connected
+        if sound != .none {
+            Button {
+                switch sound {
+                case .unavailable(let m), .error(let m): why = m
+                default: stream.setSound(!sound.isOn)
+                }
+            } label: {
+                Group {
+                    if sound == .starting { ProgressView().tint(.white) }
+                    else {
+                        Image(systemName: sound.isOn ? "speaker.wave.2.fill" : blocked(sound) ? "speaker.slash" : "speaker.slash.fill")
+                    }
+                }
+                .font(compact ? .caption : .title3)
+                .foregroundStyle(sound == .on ? Color.green : blocked(sound) ? .white.opacity(0.4) : .white)
+                .frame(width: compact ? 26 : 32, height: compact ? 26 : 32)
+                .background(compact ? Color.black.opacity(0.45) : .clear, in: Circle())
+            }
+            .disabled(!live && !blocked(sound))
+            .accessibilityLabel(sound.isOn ? "Turn sound off" : "Turn sound on")
+            .accessibilityHint(blocked(sound) ? "Sound is not available" : "Plays the office computer's sound")
+            .alert("Sound unavailable", isPresented: Binding(get: { why != nil }, set: { if !$0 { why = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: { Text(why ?? "") }
+        }
+    }
+
+    private func blocked(_ s: LiveSound) -> Bool {
+        if case .unavailable = s { return true }
+        if case .error = s { return true }
+        return false
+    }
+}
+
 /// Live view quality for the active machine; picking one reconnects an open view (mobd fixes it per session).
 private struct QualityMenu: View {
     @Environment(AppState.self) private var app
@@ -240,6 +286,7 @@ private struct QualityMenu: View {
             }
         } label: {
             Label(value.label, systemImage: "gauge.with.dots.needle.33percent").font(.subheadline)
+                .lineLimit(1).fixedSize()
         }
         .accessibilityLabel("Live view quality: \(value.label)")
     }
@@ -279,6 +326,7 @@ struct LiveView: View {
                     .accessibilityLabel("Close")
                 StatusChip()
                 Spacer()
+                SoundButton(compact: false)
                 QualityMenu()
                 if live {
                     Picker("Mode", selection: Binding(get: { s.control }, set: { stream.setControl($0) })) {
