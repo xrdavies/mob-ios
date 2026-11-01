@@ -292,4 +292,15 @@ final class WebSocketVideoTests: XCTestCase {
         s.disconnect()
         XCTAssertFalse(PlaybackAudioDevice.shared.audible, "closing the view turns sound off")
     }
+
+    func testRelayIceServersDecode() throws {
+        struct Answer: Decodable { let iceServers: [APIClient.IceServer] }
+        let a = try APIClient.decoder.decode(Answer.self, from: Data(#"""
+            {"iceServers":[{"urls":["stun:relay.example.com:3478"]},{"urls":["turn:relay.example.com:3478"],"username":"1800043200:office","credential":"c2VjcmV0"}],"ttlSeconds":43200}
+            """#.utf8))
+        XCTAssertEqual(a.iceServers.count, 2)
+        XCTAssertNil(a.iceServers[0].username)
+        XCTAssertEqual(a.iceServers[1].username, "1800043200:office")
+        XCTAssertEqual(networkOf("203.0.113.9", candidateType: "relay"), .relay)
+    }
 }

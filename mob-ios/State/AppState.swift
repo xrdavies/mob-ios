@@ -336,7 +336,7 @@ final class AppState: MachineEvents {
         stream.onTransport = { [weak self] t in self?.rememberTransport(id, t) }
         stream.connect(client: apiClient, maxWidth: Int(size.width), maxHeight: Int(size.height),
                        quality: quality, control: control, preferWebSocket: m.liveWebSocket == true, sessionId: sessionId,
-                       audio: health.supports("streamAudio"))
+                       audio: health.supports("streamAudio"), ice: health.supports("streamIce"))
     }
 
     /// The open chat changed; reconnect the live view to follow it (session desktops only).
