@@ -109,8 +109,9 @@ final class StreamSession {
     /// Opens a session sized to the view (pixels); `control` takes control once the picture arrives.
     /// `preferWebSocket`: the WebSocket carried this machine's last session; race it after 1 s.
     /// `audio`: mobd shares its sound (`streamAudio`); the view offers it, off until `setSound(true)`.
+    /// `ice`: mobd gives a Mob relay's STUN/TURN servers (`streamIce`), fetched before the offer.
     func connect(client: APIClient, maxWidth: Int, maxHeight: Int, quality: LiveQuality, control: Bool = false, preferWebSocket: Bool = false,
-                 sessionId: String? = nil, audio: Bool = false) {
+                 sessionId: String? = nil, audio: Bool = false, ice: Bool = false) {
         disconnect(keepSound: true)
         attempt += 1
         let a = attempt
@@ -121,7 +122,7 @@ final class StreamSession {
         size = (maxWidth, maxHeight)
         state = LiveState(status: .connecting, detail: "Connecting…")
         Log.add("live view: connecting over WebRTC (\(maxWidth)×\(maxHeight), \(quality.rawValue))")
-        Task { await run(a, client: client, maxWidth: maxWidth, maxHeight: maxHeight, quality: quality, preferWebSocket: preferWebSocket, audio: audio) }
+        Task { await run(a, client: client, maxWidth: maxWidth, maxHeight: maxHeight, quality: quality, preferWebSocket: preferWebSocket, audio: audio, ice: ice) }
         Task { [weak self] in
             try? await Task.sleep(for: Self.connectTimeout)
             guard let self, self.attempt == a, self.state.status == .connecting else { return }
@@ -129,10 +130,23 @@ final class StreamSession {
         }
     }
 
-    private func run(_ a: Int, client: APIClient, maxWidth: Int, maxHeight: Int, quality: LiveQuality, preferWebSocket: Bool, audio: Bool) async {
+    private func run(_ a: Int, client: APIClient, maxWidth: Int, maxHeight: Int, quality: LiveQuality, preferWebSocket: Bool, audio: Bool, ice: Bool) async {
         guard attempt == a else { return }
+        // Through a Mob relay: its STUN and TURN servers, so WebRTC works where host candidates cannot.
+        // Without them (or if fetching fails), host candidates only: LAN and Tailscale.
+        var servers: [APIClient.IceServer] = []
+        if ice {
+            do { servers = try await client.streamIce() } catch {
+                if error.isUnauthorized { onUnauthorized?(client); return fail(a, readable(error)) }
+                Log.error("live view: no relay servers: \(readable(error))")
+            }
+            guard attempt == a else { return }
+        }
         let config = RTCConfiguration()
-        config.sdpSemantics = .unifiedPlan // host candidates only: LAN and Tailscale
+        config.sdpSemantics = .unifiedPlan
+        config.iceServers = servers.map { RTCIceServer(urlStrings: $0.urls, username: $0.username, credential: $0.credential) }
+        // Debugging: `-liveRelayOnly YES` as a launch argument allows only relayed candidates.
+        if !servers.isEmpty && UserDefaults.standard.bool(forKey: "liveRelayOnly") { config.iceTransportPolicy = .relay }
         let bridge = Bridge(owner: self, attempt: a)
         guard let pc = Self.factory.peerConnection(with: config, constraints: RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil), delegate: bridge) else {
             return fail(a, "Could not start WebRTC")
@@ -169,8 +183,9 @@ final class StreamSession {
             try await withCheckedThrowingContinuation { (k: CheckedContinuation<Void, Error>) in
                 pc.setLocalDescription(offer) { err in if let err { k.resume(throwing: err) } else { k.resume() } }
             }
-            // Non-trickle: host candidates gather in milliseconds; wait at most 2 s.
-            for _ in 0..<40 where pc.iceGatheringState != .complete { try await Task.sleep(for: .milliseconds(50)) }
+            // Non-trickle: host candidates gather in milliseconds; wait at most 2 s, or 3 s with STUN
+            // and TURN servers, whose answers take longer.
+            for _ in 0..<(servers.isEmpty ? 40 : 60) where pc.iceGatheringState != .complete { try await Task.sleep(for: .milliseconds(50)) }
             guard attempt == a else { return }
             var sdpOffer = pc.localDescription?.sdp ?? offer.sdp
             if blockWebRTC { sdpOffer = withoutCandidates(sdpOffer) }

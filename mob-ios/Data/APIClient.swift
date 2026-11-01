@@ -168,6 +168,19 @@ final class APIClient {
         return body
     }
 
+    /// A Mob relay's STUN and TURN servers (GET /stream/ice, mobd with `streamIce`), with TURN
+    /// credentials minted for this device.
+    struct IceServer: Decodable, Equatable {
+        let urls: [String]
+        var username: String? = nil
+        var credential: String? = nil
+    }
+
+    func streamIce() async throws -> [IceServer] {
+        struct Answer: Decodable { let iceServers: [IceServer]? }
+        return (try await get("stream/ice") as Answer).iceServers ?? []
+    }
+
     /// Closes a stream session (DELETE /stream/:id), fire and forget.
     /// GET /stream/ws for an open session, with the device token in the header (native clients need
     /// no ticket).
