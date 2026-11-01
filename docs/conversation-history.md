@@ -8,9 +8,9 @@ you scroll. The protocol is in
 `GET /sessions/{id}/history` for pages and bounded changes, `seq` for turn order, `sessionHistory`
 in `/health`. Without that feature the app keeps today's full-snapshot request.
 
-The [agent collaboration draft](agent-collaboration.md) proposes independent
-request summaries and revision sync alongside this turn cache. These additions
-are not implemented; pending requests cannot depend on loading their old turns.
+The [agent collaboration draft](agent-collaboration.md) keeps pending requests
+visible independently of loaded chat turns. The shared architecture is proposed;
+its synchronization and cache details will be defined during implementation.
 
 ## Local copy
 

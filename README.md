@@ -27,8 +27,8 @@ Same as [mob-android](https://github.com/xrdavies/mob-android):
 ## Agent collaboration (draft)
 
 The [collaboration plan](docs/agent-collaboration.md) follows the shared Mob
-vocabulary and mobd contract, with iOS reference selection, request views, local
-copies and foreground recovery. Cross-agent messaging is not implemented yet.
+vocabulary and architecture, with iOS interaction and foreground recovery.
+Cross-agent messaging is not implemented yet.
 
 ## USB redirection (draft)
 
