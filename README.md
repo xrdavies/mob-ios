@@ -24,6 +24,12 @@ Same as [mob-android](https://github.com/xrdavies/mob-android):
 - **Setup warnings** from mobd's readiness checks
 - **Live desktop**: see below
 
+## Agent collaboration (draft)
+
+The [collaboration plan](docs/agent-collaboration.md) follows the shared Mob
+vocabulary and mobd contract, with iOS reference selection, request views, local
+copies and foreground recovery. Cross-agent messaging is not implemented yet.
+
 ## USB redirection (draft)
 
 The [USB scope document](docs/usb-redirection.md) follows the shared Desktop-to-mobd plan.
