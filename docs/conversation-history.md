@@ -1,6 +1,6 @@
 # Conversation history: local copy and paging (iOS)
 
-Status: implemented on `feat/conversation-history`
+Status: implemented
 
 Mob Mobile for iPhone and iPad keeps a local copy of each conversation and loads older turns as
 you scroll. The protocol is in
@@ -48,11 +48,14 @@ than that is saved (when inside the saved range) but not added to the end, so it
 
 | State | Shown |
 |---|---|
+| Opening a chat with no saved copy | Spinner in place of the conversation, also while retrying |
+| That first load failed | **Couldn't load this conversation** with the reason and **Retry**; polling keeps retrying |
 | Opening a saved chat, returning to the foreground, reconnecting | Spinner and **Syncing…** under the title |
 | Up to date | Nothing |
 | mobd unreachable | **Offline · showing saved copy** |
 | Sync failed while online | **Couldn't sync · Retry** |
 | Loading older turns | Spinner row at the top |
+| Older turns failed to load | The reason and **Retry** at the top, until Retry is tapped |
 | Older turns not saved, offline | **Older messages aren't available offline** |
 
 The status appears only after about 300 ms, and routine polls show nothing unless they fail; a
@@ -63,12 +66,30 @@ and a reconnected event stream sync with "Syncing…".
 
 ## Timeline
 
-When older turns are prepended, the timeline scrolls back to the turn that was first
-(`ScrollViewReader.scrollTo`, anchor top), so the visible turn stays in place. On iOS 18 the load
-starts when the scroll offset comes within 400 points of the top (`onScrollGeometryChange`); after
-the position is restored it is lower down, so one scroll loads one page. On iOS 17 a row above the
-oldest turn starts it when it appears. A page load does not scroll to the bottom or start a second
-request; an error leaves the cursor unchanged with Retry.
+When older turns are added above, what is on screen stays where it is, also in the middle of a
+long message (mob-ios#6). On iOS 18 the timeline keeps the last layout seen with each first turn;
+when the first turn changes because older turns were added, the content grew above by the new
+height minus the old one, and the offset grows by as much (`ScrollPosition.scrollTo(y:)`). The
+change of first turn and the layout with the new turns arrive in either order, and SwiftUI does not
+always report the layout just before, so both are matched by the first turn. The new offset is
+set in the layout after the one with the new turns. A page that lands while a finger is on the
+screen can still be off by about one drag step: the gesture keeps scrolling from where it started.
+At the end of the conversation the
+bottom anchor keeps the end in view instead. The row above the oldest turn has one
+height whether it shows a spinner, an error or nothing, so it never moves the turns below. On iOS 17
+the whole scroll view is anchored at the bottom, which keeps the text in place when turns are
+added above; "at the end" is whether the bottom marker is on screen, so new content only scrolls
+down there.
+
+On iOS 18 the load starts when the offset comes within 400 points of the top
+(`onScrollGeometryChange`); once a page is laid out and the timeline is still that close (a short
+page), the next one loads. On iOS 17 the row above the oldest turn starts it when it appears. A
+page load does not scroll to the bottom; a failed page leaves the cursor unchanged and waits for
+Retry instead of retrying on its own.
+
+Each request for older turns belongs to one visit of the conversation (`visit`, counted by every
+open): opening another conversation cancels it, and an answer for an earlier visit (A, then B, then
+A again) changes neither the turns, the cursors, the error nor the spinner of the current one.
 
 ## Storage limit
 
@@ -90,8 +111,20 @@ Settings → **Saved conversations** shows the space used and **Clear local copy
 `mob-iosTests/HistoryTests.swift`: merging, the store's pages, `rev` rule and cursors, eviction
 order and trimming, a corrupt file rebuilt and excluded from backup; `ChatStore` against a fake
 mobd for first and older pages, a relaunch that syncs only changes and reads older turns from the
-copy, an old changed turn not appended, `reset`, removal after a `404`, offline reading.
+copy, an old changed turn not appended, `reset`, removal after a `404`, offline reading, an older
+page from an earlier visit dropped while the current one keeps loading, and a failed first load
+without a saved copy showing its error, then the spinner while retrying.
 
-Checked on the simulator against a mobd from the `feat/conversation-history` branch with a 45-turn
-conversation: pairing, the newest page, and scrolling up loads the page before without moving
-the visible turn.
+`mob-iosUITests/HistoryScrollTests.swift` (opt-in, against a real mobd with a long conversation):
+no turn far from the newest is on screen when the chat opens, and while scrolling up with slow
+drags the text on screen follows
+each drag as two older pages are added. With `MOBD_SETTLE` it waits after each drag, for a mobd
+behind a proxy that delays older pages, and requires that nothing moves while the timeline is at
+rest.
+
+Checked on the iPhone simulator (iOS 26) against mobd with a 45-turn conversation of long replies,
+older pages delayed by 2 s through a proxy, pausing 3 s after each 300-point drag: nothing moved at
+rest after any drag, the second page landed with the text exactly in place, and the last page,
+landing during a drag, left it 119 points from where the drag put it. The same test on the previous
+timeline failed at the second page (158 points). Not checked: iOS 17 (no simulator runtime here),
+iPad, rotation and the keyboard.

@@ -182,6 +182,52 @@ final class HistoryTests: XCTestCase {
         await until("older not available") { chat.olderError != nil }
         XCTAssertEqual(chat.olderError, "Older messages aren't available offline")
     }
+
+    /// mob-ios#6: a slow older page from an earlier visit (A, B, A again) changes nothing and does
+    /// not end the current visit's loading.
+    func testAnOlderPageFromAnEarlierVisitIsDropped() async {
+        FakeOffice.reset(count: 45)
+        let store = HistoryStore(url: temp())
+        let (chat, _) = makeChat(store)
+        await until("newest page") { chat.detail?.tasks.count == 20 && chat.sync == .none }
+        FakeOffice.hold = "before="
+        chat.loadOlder()
+        await until("first request held") { FakeOffice.held == 1 }
+        chat.open(nil)
+        chat.open("s")
+        await until("reopened") { chat.detail?.tasks.count == 20 && chat.sync == .none }
+        XCTAssertFalse(chat.olderLoading)
+        chat.loadOlder()
+        await until("second request held") { FakeOffice.held == 2 }
+        FakeOffice.release(0)
+        try? await Task.sleep(for: .milliseconds(400))
+        XCTAssertEqual(chat.detail?.tasks.count, 20, "the earlier visit's page was merged")
+        XCTAssertTrue(chat.olderLoading, "the earlier visit's request ended this visit's loading")
+        FakeOffice.release(1)
+        await until("this visit's page") { chat.detail?.tasks.count == 40 && !chat.olderLoading }
+        XCTAssertNil(chat.olderError)
+    }
+
+    /// mob-ios#6: without a saved copy, a failed first load says so with Retry, and a retry under
+    /// way shows the spinner instead of an empty conversation.
+    func testAFailedFirstLoadShowsTheErrorAndTheRetry() async {
+        FakeOffice.reset(count: 25)
+        FakeOffice.state.offline = true
+        let (chat, _) = makeChat(HistoryStore(url: temp()))
+        await until("load error") { chat.loadError != nil }
+        XCTAssertNil(chat.detail)
+        XCTAssertFalse(chat.loading)
+        XCTAssertNil(chat.error, "shown in place of the conversation, not as an alert")
+        FakeOffice.state.offline = false
+        FakeOffice.hold = "/history"
+        chat.retry()
+        await until("retrying") { chat.loading && FakeOffice.held == 1 }
+        XCTAssertNil(chat.detail)
+        FakeOffice.release(0)
+        await until("loaded") { chat.detail?.tasks.count == 20 }
+        XCTAssertFalse(chat.loading)
+        XCTAssertNil(chat.loadError)
+    }
 }
 
 /// A mobd with sessionHistory and one conversation "s"; cursors are "c<seq>".
@@ -195,12 +241,20 @@ private final class FakeOffice: URLProtocol {
     }
     nonisolated(unsafe) static var state = State()
     nonisolated(unsafe) static var requests: [String] = []
+    /// Requests whose path and query contain this wait until `release(n)` (n: the order they came).
+    nonisolated(unsafe) static var hold: String?
+    nonisolated(unsafe) private static var gates: [DispatchSemaphore] = []
     private static let lock = NSLock()
+
+    static var held: Int { lock.withLock { gates.count } }
+    static func release(_ n: Int) { lock.withLock { gates[n] }.signal() }
 
     static func reset(count: Int64) {
         lock.withLock {
             state = State(tasks: (1...count).map { AgentTask(id: "t\($0)", sessionId: "s", status: Status.succeeded, eventId: 1, rev: $0, seq: $0) }, rev: count)
             requests = []
+            hold = nil
+            gates = []
         }
     }
 
@@ -220,6 +274,16 @@ private final class FakeOffice: URLProtocol {
 
     override func startLoading() {
         let url = request.url!
+        let gate: DispatchSemaphore? = Self.lock.withLock {
+            guard let hold = Self.hold, (url.path + "?" + (url.query ?? "")).contains(hold) else { return nil }
+            Self.gates.append(DispatchSemaphore(value: 0))
+            return Self.gates.last
+        }
+        // A held request waits off the loading thread, so other requests keep being answered.
+        if let gate { DispatchQueue.global().async { gate.wait(); self.answer(url) } } else { answer(url) }
+    }
+
+    private func answer(_ url: URL) {
         let (status, body): (Int, Any?) = Self.lock.withLock {
             Self.requests.append(url.path + (url.query.map { "?\($0)" } ?? ""))
             let s = Self.state

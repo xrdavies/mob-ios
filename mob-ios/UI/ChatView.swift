@@ -162,6 +162,10 @@ struct ChatView: View {
             empty("New chat on \(app.activeMachine?.name ?? "")", "Ask the agent to do something on the office computer")
         } else if chat.detail == nil && chat.loading && outgoing == nil {
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if chat.detail == nil, let error = chat.loadError, outgoing == nil {
+            empty("Couldn't load this conversation", error) {
+                Button("Retry") { chat.retry() }.buttonStyle(.borderedProminent)
+            }
         } else {
             ChatTimeline(items: items, lastFooter: lastFooter, outgoing: outgoing)
                 .id("\(app.activeMachineId ?? "")/\(chat.currentId ?? "")")
@@ -201,20 +205,19 @@ private struct ChatTimeline: View {
                     }
                     if let o = outgoing { OutgoingMessage(text: o.text).id("outbox") }
                     Color.clear.frame(height: 1).id("bottom")
+                        // iOS 17 has no scroll geometry callback: the end is shown while this is.
+                        .onAppear { if #unavailable(iOS 18.0) { atBottom = true } }
+                        .onDisappear { if #unavailable(iOS 18.0) { atBottom = false } }
                 }
                 .padding(16)
             }
-            .modifier(ChatScrollPosition(atBottom: $atBottom))
+            .modifier(ChatScrollPosition(atBottom: $atBottom, items: items))
             .accessibilityIdentifier("chatTimeline")
             .scrollDismissesKeyboard(.interactively)
             // The working row keeps its ID as replies grow; follow content only while at the bottom.
             .onChange(of: items) { if atBottom { proxy.scrollTo("bottom", anchor: .bottom) } }
             .onChange(of: outgoing) { if outgoing != nil { proxy.scrollTo("bottom", anchor: .bottom) } }
             .onChange(of: pendingQuestion) { if let pendingQuestion { proxy.scrollTo(pendingQuestion, anchor: .bottom) } }
-            // Older turns were added above: keep the turn that was first where it was.
-            .onChange(of: items.first?.id) { old, _ in
-                if !atBottom, let old, items.contains(where: { $0.id == old }) { proxy.scrollTo(old, anchor: .top) }
-            }
             .modifier(LoadOlderNearTop(chat: chat))
         }
     }
@@ -242,12 +245,15 @@ private struct OlderRow: View {
                 }
             }
         }
+        // One height in every state, so the spinner coming and going never moves the turns below.
+        .frame(maxWidth: .infinity, minHeight: 32, maxHeight: 32)
         .id("older")
     }
 }
 
-/// iOS 18: loads older turns when the timeline is scrolled near its top. After they are added the
-/// position is restored lower down, so one scroll loads one page.
+/// iOS 18: loads older turns when the timeline is scrolled near its top. Added turns keep what is
+/// on screen in place, which is then lower down; still near the top once they are laid out (a short
+/// page), the next page loads. A failed page waits for Retry.
 private struct LoadOlderNearTop: ViewModifier {
     let chat: ChatStore
     @State private var nearTop = false
@@ -257,9 +263,13 @@ private struct LoadOlderNearTop: ViewModifier {
             content
                 .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top < 400 } action: { _, near in
                     nearTop = near
-                    if near { chat.loadOlder() }
+                    if near, chat.olderError == nil { chat.loadOlder() }
                 }
-                .onChange(of: chat.olderLoading) { if !chat.olderLoading, nearTop { chat.loadOlder() } }
+                .task(id: chat.olderLoading) {
+                    guard !chat.olderLoading else { return }
+                    try? await Task.sleep(for: .milliseconds(400))
+                    if !Task.isCancelled, nearTop, chat.olderError == nil { chat.loadOlder() }
+                }
         } else {
             content
         }
@@ -301,10 +311,12 @@ private struct SyncStatusLine: View {
 
 private struct ChatScrollPosition: ViewModifier {
     @Binding var atBottom: Bool
+    let items: [TimelineItem]
 
     func body(content: Content) -> some View {
         if #available(iOS 18.0, *) {
             content
+                .modifier(KeepReadingPosition(items: items, atBottom: atBottom))
                 .defaultScrollAnchor(.bottom, for: .initialOffset)
                 .defaultScrollAnchor(.top, for: .alignment)
                 .defaultScrollAnchor(atBottom ? .bottom : .top, for: .sizeChanges)
@@ -313,8 +325,64 @@ private struct ChatScrollPosition: ViewModifier {
                 } action: { _, bottom in atBottom = bottom }
         } else {
             // shortcut: iOS 17 has no scroll geometry callback; remove this fallback when targeting iOS 18.
+            // Anchored at the bottom, older turns added above keep the text on screen in place.
             content.defaultScrollAnchor(.bottom)
         }
+    }
+}
+
+/// Older turns added above the shown ones (mob-ios#6): the content grew above what is on screen,
+/// so the offset grows by as much and the text being read stays where it is, also in the middle of
+/// a long message. It is restored in the layout after the one with the new turns; during a drag the
+/// gesture can still move it by about one step. At the end of the conversation the bottom anchor
+/// keeps the end in view instead.
+@available(iOS 18.0, *)
+private struct KeepReadingPosition: ViewModifier {
+    let items: [TimelineItem]
+    let atBottom: Bool
+    @State private var position = ScrollPosition()
+    @State private var seen = Seen()
+
+    /// The first turn is read with the geometry, so a size is matched to the items it was laid
+    /// out with.
+    fileprivate struct Layout: Equatable {
+        var offset: CGFloat
+        var height: CGFloat
+        var first: String?
+    }
+
+    /// Layouts seen, kept out of the view's state. The change of first turn and the layout with the
+    /// new turns come in either order, and SwiftUI does not always report the layout just before.
+    fileprivate final class Seen {
+        var last: Layout?
+        /// The last layout with the first turn before `last`'s.
+        var before: Layout?
+        /// The first turn changed from `from` to `to` because older turns were added.
+        var pending: (from: String, to: String?)?
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .scrollPosition($position)
+            .onScrollGeometryChange(for: Layout.self) {
+                Layout(offset: $0.contentOffset.y, height: $0.contentSize.height, first: items.first?.id)
+            } action: { _, new in
+                if let last = seen.last, last.first != new.first { seen.before = last }
+                seen.last = new
+                restore()
+            }
+            .onChange(of: items.first?.id) { old, new in
+                guard !atBottom, let old, items.contains(where: { $0.id == old }) else { return }
+                seen.pending = (old, new)
+                restore()
+            }
+    }
+
+    private func restore() {
+        guard let p = seen.pending, let last = seen.last, last.first == p.to,
+              let before = seen.before, before.first == p.from else { return }
+        seen.pending = nil
+        position.scrollTo(y: last.offset + last.height - before.height)
     }
 }
 
