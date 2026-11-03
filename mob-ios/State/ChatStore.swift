@@ -113,6 +113,8 @@ final class ChatStore {
     private(set) var sync: SyncState = .none
     private(set) var olderLoading = false
     private(set) var olderError: String?
+    /// The open conversation could not be loaded and nothing is shown yet; `retry()` tries again.
+    private(set) var loadError: String?
     /// True while the machine's global event stream is connected; polling then only backs it up.
     @ObservationIgnored var live = false
     /// mobd refused the token of this machine; AppState marks it for pairing and detaches.
@@ -124,6 +126,10 @@ final class ChatStore {
     @ObservationIgnored private var machineId = ""
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var selection = 0
+    /// Counts opens: work started for one visit of a conversation (A, then B, then A again is a
+    /// new visit) only changes what that visit shows.
+    @ObservationIgnored private var visit = 0
+    @ObservationIgnored private var older: Task<Void, Never>?
     @ObservationIgnored private var poll: Task<Void, Never>?
     @ObservationIgnored private var listPoll: Task<Void, Never>?
     @ObservationIgnored private var stream: Task<Void, Never>?
@@ -160,6 +166,8 @@ final class ChatStore {
         if saveTimer != nil { saveCurrent() }
         generation += 1
         selection += 1
+        visit += 1
+        older?.cancel()
         poll?.cancel()
         listPoll?.cancel()
         stopStream()
@@ -174,6 +182,9 @@ final class ChatStore {
         outbox = nil
         sending = false
         loading = false
+        loadError = nil
+        olderLoading = false
+        olderError = nil
         cancelling = false
         error = nil
         sync = .none
@@ -250,6 +261,9 @@ final class ChatStore {
     func open(_ id: String?) {
         let changed = id != currentId
         if changed { selection += 1 }
+        visit += 1
+        older?.cancel()
+        older = nil
         if saveTimer != nil { saveCurrent() }
         currentId = id
         defer { if changed { onOpen?() } }
@@ -259,6 +273,7 @@ final class ChatStore {
         before = nil
         olderLoading = false
         olderError = nil
+        loadError = nil
         if sync != .offline { sync = .none }
         cancelling = false
         UserDefaults.standard.set(id, forKey: key)
@@ -278,6 +293,9 @@ final class ChatStore {
         poll = Task { [weak self] in
             var first = true
             while let self, !Task.isCancelled, gen == self.generation, self.currentId == id {
+                // Nothing to show yet (first load, or retrying after it failed): the spinner says
+                // a request is under way.
+                if self.detail == nil { self.loading = true }
                 do {
                     if self.paged == nil { self.paged = (try? await client.health())?.supports("sessionHistory") }
                     if first, self.paged != false, self.detail == nil {
@@ -312,6 +330,7 @@ final class ChatStore {
                     if let synced, !stale { self.apply(synced) }
                     else if !stale { self.detail = fresh }
                     if self.sync != .none { self.sync = .none }
+                    self.loadError = nil
                     if self.detail?.busy != true { self.cancelling = false }
                     self.followTurn(client, gen)
                 } catch {
@@ -325,9 +344,13 @@ final class ChatStore {
                         // The saved copy stays readable; the status says why it may be behind.
                         self.sync = error.isUnreachable ? .offline : .failed
                         Log.error("sync failed: \(readable(error))")
+                    } else if self.detail == nil, gen == self.generation {
+                        // Shown in place of the conversation with Retry; polling keeps retrying.
+                        self.loadError = readable(error)
+                        Log.error("loading the conversation failed: \(readable(error))")
                     } else if first, gen == self.generation { self.error = readable(error) }
                 }
-                if first { self.loading = false }
+                if first || self.detail == nil { self.loading = false }
                 first = false
                 let wait: Double = self.stream != nil ? 30 : self.detail?.busy == true ? 2 : self.live ? 60 : 8
                 try? await Task.sleep(for: .seconds(wait))
@@ -343,6 +366,12 @@ final class ChatStore {
 
     /// Re-reads the open conversation now (after an action) without clearing it.
     private func reload(indicate: Bool = false) { if let id = currentId { follow(id, indicate: indicate) } }
+
+    /// Retry after the open conversation failed to load.
+    func retry() {
+        guard detail == nil, !loading else { return }
+        reload()
+    }
 
     /// Returning to the app: catches up with what changed meanwhile, showing "Syncing…".
     func resync() {
@@ -390,11 +419,14 @@ final class ChatStore {
     func loadOlder() {
         guard hasOlder, !olderLoading, let shown = detail, let from = shown.tasks.first?.seq else { return }
         let id = shown.session.id
-        let gen = generation
+        let gen = generation, visit = visit
         olderLoading = true
         olderError = nil
-        Task {
-            defer { if gen == generation, currentId == id { olderLoading = false } }
+        older = Task {
+            // Only this visit's request may change the conversation, cursors and indicators: a slow
+            // answer for an earlier visit (A, B, A again) is dropped.
+            @MainActor func mine() -> Bool { !Task.isCancelled && gen == generation && visit == self.visit && currentId == id }
+            defer { if mine() { olderLoading = false; older = nil } }
             var page: ChatDetail?
             if let stored = storedFrom, stored < from,
                let saved = await history.load(machine: historyKey, id: id, before: from, limit: Self.page), !saved.turns.isEmpty {
@@ -404,7 +436,7 @@ final class ChatStore {
                 if page == nil {
                     guard let cursor = before, let client = api else { throw APIError(message: "mobd gave no cursor for older messages", status: nil) }
                     let answer = try await client.history(id, ["before": cursor, "limit": String(Self.page)])
-                    guard gen == generation, currentId == id else { return }
+                    guard mine() else { return }
                     let fresh = ChatDetail.merged(answer, onto: nil)
                     storedFrom = fresh.oldestSeq
                     before = answer.before
@@ -413,7 +445,7 @@ final class ChatStore {
                     page = fresh
                     save(fresh.turns(), cursors: cursors)
                 }
-                guard gen == generation, currentId == id, let page, let current = detail else { return }
+                guard mine(), let page, let current = detail else { return }
                 // Older pages never move the sync baseline or the session metadata.
                 var merged = ChatDetail.mergedTurns(page, onto: current, from: page.oldestSeq ?? from)
                 let messages = merged.session.messages
@@ -421,7 +453,7 @@ final class ChatStore {
                 merged.session.messages = messages
                 detail = merged
             } catch {
-                guard gen == generation, currentId == id else { return }
+                guard mine(), !(error is CancellationError) else { return }
                 Log.error("loading older turns failed: \(readable(error))")
                 olderError = error.isUnreachable ? "Older messages aren't available offline" : "Couldn't load older messages"
             }
