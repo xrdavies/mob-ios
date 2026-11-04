@@ -101,6 +101,7 @@ struct ChatView: View {
     private func chatColumn(_ items: [TimelineItem], lastFooter: String?, thumbnailOnTop: Bool, width: CGFloat) -> some View {
         VStack(spacing: 0) {
             RouteBanner()
+            if app.collaboration { CollabStrip() }
             if let banner = app.desktops.visibleBanner { ResourceBannerView(banner: banner) }
             if thumbnailOnTop, app.showDesktopDrawer, app.activeMachine != nil {
                 DesktopThumbnail(width: width)
@@ -121,8 +122,13 @@ struct ChatView: View {
 
     private var title: some View {
         VStack(spacing: 1) {
-            Text(chat.currentId == nil ? "New chat" : chat.detail?.session.displayTitle ?? "…")
-                .font(.headline).lineLimit(1)
+            HStack(spacing: 6) {
+                Text(chat.currentId == nil ? "New chat" : chat.detail?.session.displayTitle ?? "…")
+                    .font(.headline).lineLimit(1)
+                if app.collaboration, let session = chat.detail?.session {
+                    HandleBadge(handle: session.handle)
+                }
+            }
             HStack(spacing: 5) {
                 Circle().fill(app.isConnected ? Color.success : .red).frame(width: 7, height: 7)
                 if let m = app.activeMachine, m.addresses.count > 1, let a = m.address {
@@ -395,6 +401,7 @@ struct SessionList: View {
     var sidebar = false
     @State private var showArchived = false
     @State private var renaming: Session?
+    @State private var handling: Session?
     @State private var newTitle = ""
     @State private var deleting: Session?
     @State private var confirmArchive: Session?
@@ -505,6 +512,7 @@ struct SessionList: View {
         } message: {
             Text("Its desktop closes; open windows are lost.")
         }
+        .sheet(item: $handling) { s in HandleSheet(session: s).environment(app) }
         .alert(seedNotice ?? "", isPresented: Binding(get: { seedNotice != nil }, set: { if !$0 { seedNotice = nil } })) {
             Button("OK", role: .cancel) {}
         }
@@ -552,9 +560,12 @@ struct SessionList: View {
             HStack(spacing: 12) {
                 statusIcon(s).frame(width: 22)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(s.displayTitle).lineLimit(1)
-                        .fontWeight(s.id == chat.currentId ? .semibold : .regular)
-                        .foregroundStyle(.primary)
+                    HStack(spacing: 6) {
+                        Text(s.displayTitle).lineLimit(1)
+                            .fontWeight(s.id == chat.currentId ? .semibold : .regular)
+                            .foregroundStyle(.primary)
+                        if app.collaboration { HandleBadge(handle: s.handle) }
+                    }
                     Text([s.runner, relativeTime(s.updatedAt)].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
                         .font(.caption).foregroundStyle(.secondary)
                 }
@@ -577,6 +588,9 @@ struct SessionList: View {
         }
         .contextMenu {
             Button { newTitle = s.title ?? ""; renaming = s } label: { Label("Rename", systemImage: "pencil") }
+            if app.collaboration {
+                Button { handling = s } label: { Label(s.handle.map { "Handle @\($0)…" } ?? "Set handle…", systemImage: "at") }
+            }
             if s.archived != true {
                 Button { chat.setPinned(s, s.pinned != true) } label: { Label(s.pinned == true ? "Unpin" : "Pin", systemImage: "pin") }
             }

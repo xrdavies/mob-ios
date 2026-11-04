@@ -118,6 +118,8 @@ struct AgentTask: Codable, Identifiable, Hashable {
     var rev: Int64?
     /// The turn's 1-based position in its conversation; it never changes.
     var seq: Int64?
+    /// Who started it (agent collaboration); nil is the user.
+    var origin: TurnOrigin?
 
     var modelLabel: String {
         guard let model, !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return "Default model (not reported)" }
@@ -140,6 +142,8 @@ struct Session: Codable, Identifiable, Hashable {
     var archived: Bool?
     var createdAt: String?
     var updatedAt: String?
+    /// The agent's name (@api), separate from the title (mobd with "agentCollaboration").
+    var handle: String?
     /// Only GET /sessions/{id} includes messages; lists and events omit them.
     var messages: [Message]?
 

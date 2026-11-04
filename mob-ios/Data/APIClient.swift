@@ -217,8 +217,10 @@ final class APIClient {
     /// model / effort set the conversation's settings; "" returns to the machine default.
     @discardableResult
     func patchSession(_ id: String, title: String? = nil, pinned: Bool? = nil, archived: Bool? = nil,
-                      model: String? = nil, effort: String? = nil) async throws -> Session {
+                      model: String? = nil, effort: String? = nil, handle: String? = nil, takeHandle: Bool = false) async throws -> Session {
         var body: [String: Any] = [:]
+        if let handle { body["handle"] = handle }
+        if takeHandle { body["takeHandle"] = true }
         if let title { body["title"] = title }
         if let pinned { body["pinned"] = pinned }
         if let archived { body["archived"] = archived }
@@ -243,14 +245,23 @@ final class APIClient {
         (try await get("tasks", query: ["limit": String(limit)]) as TasksResponse).tasks ?? []
     }
 
-    func createTask(prompt: String, sessionId: String?, runner: String?, model: String?, effort: String?, attachments: [String]) async throws -> AgentTask {
+    func createTask(prompt: String, sessionId: String?, runner: String?, model: String?, effort: String?, attachments: [String],
+                    mentions: [String] = []) async throws -> AgentTask {
         var body: [String: Any] = ["prompt": prompt]
+        if !mentions.isEmpty { body["mentions"] = mentions }
         if let sessionId { body["sessionId"] = sessionId }
         if let runner { body["runner"] = runner }
         if let model { body["model"] = model }
         if let effort { body["effort"] = effort }
         if !attachments.isEmpty { body["attachments"] = attachments }
         return try APIClient.decoder.decode(AgentTask.self, from: await send("POST", "tasks", body: body))
+    }
+
+    /// A conversation's collaboration requests (mobd with "agentCollaboration").
+    func collab(session: String) async throws -> CollabList { try await get("collab", query: ["session": session]) }
+
+    func cancelCollab(_ requestId: String) async throws -> CollabRequest {
+        try APIClient.decoder.decode(CollabRequest.self, from: await send("POST", "collab/requests/\(requestId)/cancel"))
     }
 
     func cancel(_ taskId: String) async throws { _ = try await send("POST", "tasks/\(taskId)/cancel") }

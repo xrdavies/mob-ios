@@ -46,6 +46,8 @@ final class AppState: MachineEvents {
 
     private(set) var apiClient: APIClient
     let chat = ChatStore()
+    /// The open conversation's agent collaboration requests.
+    let collab = CollabStore()
     let drafts = ChatDrafts()
     let desktops = DesktopStore()
     let files = FileTransferStore()
@@ -88,7 +90,8 @@ final class AppState: MachineEvents {
         if changed { saveMachines() }
         chat.onUnauthorized = { [weak self] id in self?.markNeedsPairing(id) }
         files.onUnauthorized = { [weak self] error, client in self?.noteFailure(error, client: client) }
-        chat.onOpen = { [weak self] in self?.followChat() }
+        chat.onOpen = { [weak self] in
+            self?.refreshCollab(); self?.followChat() }
         stream.onReady = { [weak self] in self?.resizeDesktop() }
         stream.onUnauthorized = { [weak self] client in
             self?.noteFailure(APIError(message: "Unauthorized", status: 401), client: client)
@@ -461,6 +464,20 @@ final class AppState: MachineEvents {
     }
 
     func onUnauthorized(_ m: Machine) { markNeedsPairing(m.id) }
+
+    func onCollab(_ m: Machine, _ r: CollabRequest) {
+        guard m.id == activeMachineId, let id = chat.currentId, r.from == id || r.to == id else { return }
+        collab.onEvent(r)
+    }
+
+    /// Whether the active machine's mobd supports agent collaboration.
+    var collaboration: Bool { health?.supports("agentCollaboration") == true }
+
+    /// Reloads the open conversation's requests (on open and reconnect).
+    func refreshCollab() {
+        guard collaboration, let id = chat.currentId else { return collab.clear() }
+        collab.refresh(session: id, client: apiClient)
+    }
 
     func onDesktop(_ m: Machine, _ event: DesktopEvent) {
         guard m.id == activeMachineId else { return }
