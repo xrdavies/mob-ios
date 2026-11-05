@@ -52,7 +52,7 @@ Validate the A/B exchange, user control and background/foreground recovery
 first. UI component details, API models and cache changes follow after the
 shared implementation contract is defined.
 
-## Status: iOS (feat/agent-collab-core)
+## Status: iOS
 
 Built against mobd's `feat/agent-collab-core` API, matching Desktop's design. Unit tests pass.
 Checked on the iPhone 17 Pro simulator against the office mobd running that branch (2026-11-06):
