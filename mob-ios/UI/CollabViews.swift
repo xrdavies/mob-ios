@@ -391,7 +391,7 @@ struct PeerMessage: View {
     }
 }
 
-/// The user's text with @mentions of other conversations as chips; tapping one opens it.
+/// The user's text with @mentions of other conversations in bold; tapping one opens it.
 struct MentionText: View {
     @Environment(AppState.self) private var app
     let text: String
@@ -403,9 +403,8 @@ struct MentionText: View {
             var part = AttributedString(seg.text)
             if let id = seg.session {
                 part.link = URL(string: "mob-agent:\(id)")
-                part.font = .body.weight(.semibold)
-                part.backgroundColor = .white.opacity(0.22)
-                part.underlineStyle = .single
+                // Bold in the bubble's own colour, as in Messages: a box or underline read as a selected link.
+                part.font = .body.weight(.bold)
             }
             out += part
         }
