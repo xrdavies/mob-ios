@@ -70,6 +70,8 @@ final class StreamSession {
     @ObservationIgnored private var player: WsPlayer?
     @ObservationIgnored private var startWs: ((Bool) -> Void)?
     @ObservationIgnored private var graceTask: Task<Void, Never>?
+    /// Ends an attempt that shows no picture in time; restarted when the WebSocket takes over.
+    @ObservationIgnored private var timeoutTask: Task<Void, Never>?
     @ObservationIgnored private var lastRtt: Int?
     /// The user turned sound on in this view; kept through reconnects, cleared when the view closes.
     @ObservationIgnored private var wantSound = false
@@ -123,9 +125,18 @@ final class StreamSession {
         state = LiveState(status: .connecting, detail: "Connecting…")
         Log.add("live view: connecting over WebRTC (\(maxWidth)×\(maxHeight), \(quality.rawValue))")
         Task { await run(a, client: client, maxWidth: maxWidth, maxHeight: maxHeight, quality: quality, preferWebSocket: preferWebSocket, audio: audio, ice: ice) }
-        Task { [weak self] in
+        armTimeout(a)
+    }
+
+    /// The attempt fails unless a picture arrives within `connectTimeout`. The WebSocket gets its own
+    /// time: on a slow path (cellular through a Tailscale relay) it can open late in the first window,
+    /// and was then closed before its first picture.
+    private func armTimeout(_ a: Int) {
+        timeoutTask?.cancel()
+        timeoutTask = Task { [weak self] in
             try? await Task.sleep(for: Self.connectTimeout)
-            guard let self, self.attempt == a, self.state.status == .connecting else { return }
+            guard !Task.isCancelled, let self, self.attempt == a, self.state.status == .connecting else { return }
+            Log.add("live view: no picture after \(self.ms()) ms (\(self.player != nil ? "WebSocket" : "WebRTC"))", error: true)
             self.fail(a, "The live view did not start. Is the office computer reachable from here?")
         }
     }
@@ -188,6 +199,7 @@ final class StreamSession {
             for _ in 0..<(servers.isEmpty ? 40 : 60) where pc.iceGatheringState != .complete { try await Task.sleep(for: .milliseconds(50)) }
             guard attempt == a else { return }
             var sdpOffer = pc.localDescription?.sdp ?? offer.sdp
+            Log.add("live view: offer after \(ms()) ms, gathering \(pc.iceGatheringState == .complete ? "complete" : "incomplete"); \(Self.candidateSummary(sdpOffer))")
             if blockWebRTC { sdpOffer = withoutCandidates(sdpOffer) }
             let answer = try await client.openStream(offer: sdpOffer, maxWidth: maxWidth, maxHeight: maxHeight, quality: quality.rawValue,
                                                      sessionId: sessionId, audio: audio)
@@ -226,6 +238,51 @@ final class StreamSession {
 
     private func ms() -> Int { Int(Date().timeIntervalSince(started) * 1000) }
 
+    // MARK: Diagnostics (mobd docs/live-view-cellular-investigation.md)
+
+    /// The offer's candidates, e.g. "candidates: host 100.94.60.46 udp cost 50, host 10.1.2.3 udp cost 900".
+    /// network-cost is libwebrtc's: 10 Wi-Fi/LAN, 50 VPN, 900 cellular.
+    nonisolated static func candidateSummary(_ sdp: String) -> String {
+        let list = sdp.components(separatedBy: "\r\n").compactMap { line -> String? in
+            guard line.hasPrefix("a=candidate:") else { return nil }
+            let f = line.split(separator: " ").map(String.init)
+            guard f.count >= 8 else { return nil }
+            let cost = f.firstIndex(of: "network-cost").flatMap { $0 + 1 < f.count ? f[$0 + 1] : nil }
+            return "\(f[7]) \(f[4]) \(f[2].lowercased())" + (cost.map { " cost \($0)" } ?? "")
+        }
+        return list.isEmpty ? "no candidates" : "candidates: " + list.joined(separator: ", ")
+    }
+
+    static func stateName(_ s: RTCPeerConnectionState) -> String {
+        switch s {
+        case .new: "new"
+        case .connecting: "connecting"
+        case .connected: "connected"
+        case .disconnected: "disconnected"
+        case .failed: "failed"
+        case .closed: "closed"
+        @unknown default: "state \(s.rawValue)"
+        }
+    }
+
+    /// The candidate pair WebRTC chose: which of the phone's networks carries the picture.
+    private func logSelectedPair(_ a: Int) {
+        pc?.statistics { report in
+            let stats = report.statistics.values
+            guard let pair = stats.first(where: { $0.type == "candidate-pair" && ($0.values["nominated"] as? NSNumber)?.boolValue == true
+                && ($0.values["state"] as? String) == "succeeded" }) else { return }
+            func describe(_ key: String) -> String {
+                guard let id = pair.values[key] as? String, let c = report.statistics[id] else { return "?" }
+                let v = c.values
+                func text(_ k: String) -> String? { v[k].map { "\($0)" } }
+                return "\(text("candidateType") ?? "?") \(text("address") ?? text("ip") ?? "?"):\(text("port") ?? "?")" + (text("networkType").map { " \($0)" } ?? "")
+            }
+            let rtt = (pair.values["currentRoundTripTime"] as? NSNumber).map { " rtt \(Int($0.doubleValue * 1000)) ms" } ?? ""
+            let line = "live view: WebRTC pair \(describe("localCandidateId")) -> \(describe("remoteCandidateId"))\(rtt)"
+            Task { @MainActor [weak self] in if self?.attempt == a { Log.add(line) } }
+        }
+    }
+
     private func withoutCandidates(_ sdp: String) -> String {
         sdp.components(separatedBy: "\r\n").filter { !$0.hasPrefix("a=candidate") }.joined(separator: "\r\n")
     }
@@ -237,6 +294,7 @@ final class StreamSession {
     private func openWebSocket(_ a: Int, client: APIClient, session id: String, race: Bool) {
         guard a == attempt, via == nil, player == nil else { return }
         Log.add(race ? "live view: WebSocket beside WebRTC after \(ms()) ms (needed here last time)" : "live view: no WebRTC after \(ms()) ms, using the WebSocket")
+        armTimeout(a)
         if !race { dropWebRTC() }
         let p = WsPlayer(request: client.streamSocketRequest(session: id), session: client.streamSession, layers: { WsLayers.all }, events: .init(
             control: { [weak self] text in
@@ -336,8 +394,11 @@ final class StreamSession {
 
     fileprivate func connectionState(_ a: Int, _ s: RTCPeerConnectionState) {
         guard a == attempt else { return }
+        Log.add("live view: WebRTC \(Self.stateName(s)) after \(ms()) ms")
         switch s {
-        case .connected: graceTask?.cancel() // the picture follows unless the racing WebSocket won at mobd
+        case .connected:
+            graceTask?.cancel() // the picture follows unless the racing WebSocket won at mobd
+            logSelectedPair(a)
         case .failed:
             if via == .webRTC { fail(a, "The live view connection was lost") }
             else if player != nil { dropWebRTC() } // the WebSocket is already trying
