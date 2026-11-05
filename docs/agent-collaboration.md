@@ -51,3 +51,27 @@ existing agents on one mobd.
 Validate the A/B exchange, user control and background/foreground recovery
 first. UI component details, API models and cache changes follow after the
 shared implementation contract is defined.
+
+## Status: iOS (feat/agent-collab-core)
+
+Built against mobd's `feat/agent-collab-core` API, matching Desktop's design. Unit tests pass.
+Checked on the iPhone 17 Pro simulator against the office mobd running that branch (2026-11-06):
+the timeline with peer messages, chips and step titles, the grouped picker and its naming step,
+and the handle sheet (new handle, a broken rule, a handle another conversation holds). Not checked
+there: starting an exchange from the phone, naming or moving a handle for real, a clarification.
+
+- **Handles:** the badge shows next to the title; the chat list's menu opens a sheet with a fixed
+  `@`, input kept to allowed characters, the rule explained as you type, a suggested handle, and an
+  explicit "Move @handle here" when another conversation holds it. Remove is a separate action.
+- **@ picker:** typing `@` at the end of the message lists "Agents" (with a handle) first, then
+  "Conversations", without the open one; archived agents are greyed out. Picking one without a
+  handle offers "Name it @suggested" or "Mention as @shortid". Picked and typed mentions are sent
+  with the message; an archived one stops the send.
+- **Who says what:** only your messages are on the right. Another agent's message is on the left
+  with its coloured initial, name (opens its conversation), framework and what it did ("asks",
+  "replied"), without mobd's instructions to the recipient. Mentions in your messages are chips
+  that open that agent. Collaboration steps read "Asked @heron: …", "Replied: …".
+- **Pending requests:** the strip above the timeline, with details and Cancel.
+
+Not done: highlighting mentions while typing (SwiftUI's `TextField` gives no caret or styled text
+without replacing the field), and the picker only follows an `@` word at the end of the text.

@@ -8,6 +8,8 @@ final class ChatDraft {
     var text = ""
     var attachments: [DraftAttachment] = []
     private(set) var sending = false
+    /// Picked mention tokens: word after "@" -> session ID.
+    var picked: [String: String] = [:]
 
     var attachmentsReady: Bool { attachments.allSatisfy { $0.uploadId != nil && $0.error == nil } }
 
@@ -15,7 +17,7 @@ final class ChatDraft {
 
     func finishSending(_ accepted: Bool) {
         sending = false
-        if accepted { text = ""; attachments = [] }
+        if accepted { text = ""; attachments = []; picked = [:] }
     }
 }
 

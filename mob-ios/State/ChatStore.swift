@@ -642,7 +642,7 @@ final class ChatStore {
 
     /// Shows the message at once; the composer keeps its draft until `done` confirms acceptance.
     func send(_ prompt: String, runner: String? = nil, model: String? = nil, effort: String? = nil,
-              attachments: [String] = [], done: @escaping (Bool) -> Void = { _ in }) {
+              attachments: [String] = [], mentions: [String] = [], done: @escaping (Bool) -> Void = { _ in }) {
         guard api != nil, !sending else { return done(false) }
         sending = true
         let sessionId = currentId
@@ -658,7 +658,8 @@ final class ChatStore {
                 }
                 done(ok)
             }
-            let task = try await client.createTask(prompt: prompt, sessionId: sessionId, runner: runner, model: model, effort: effort, attachments: attachments)
+            let task = try await client.createTask(prompt: prompt, sessionId: sessionId, runner: runner, model: model, effort: effort,
+                                                   attachments: attachments, mentions: mentions)
             ok = true
             guard gen == self.generation else { return }
             self.outbox?.taskId = task.id
@@ -734,6 +735,32 @@ final class ChatStore {
     func setArchived(_ s: Session, _ archived: Bool) {
         patch(s) { try await $0.patchSession(s.id, archived: archived) }
         if archived, s.id == currentId { open(nil) }
+    }
+
+    /// Sets ("" clears) the agent's handle; `take` moves it from the conversation that has it.
+    /// `done` gets nil on success, else the error (status 409: the handle belongs to another conversation).
+    func setHandle(_ s: Session, _ handle: String, take: Bool = false, done: @escaping (APIError?) -> Void = { _ in }) {
+        guard let client = api else { return done(APIError(message: "Not connected", status: nil)) }
+        let gen = generation
+        Task { @MainActor in
+            do {
+                _ = try await client.patchSession(s.id, handle: handle, takeHandle: take)
+                guard gen == self.generation else { return }
+                await self.loadSessions()
+                if s.id == self.currentId { self.reload() }
+                done(nil)
+            } catch let e as APIError {
+                done(e)
+            } catch {
+                done(APIError(message: readable(error), status: nil))
+            }
+        }
+    }
+
+    /// Every conversation on the machine, archived ones included, for the "@" picker.
+    func allAgents() async -> [Session] {
+        guard let client = api else { return sessions }
+        return (try? await client.sessions(archived: "all")) ?? sessions
     }
 
     private func patch(_ s: Session, _ call: @escaping (APIClient) async throws -> Void) {

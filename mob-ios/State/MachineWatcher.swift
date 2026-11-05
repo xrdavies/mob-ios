@@ -18,6 +18,8 @@ protocol MachineEvents: AnyObject {
     func onDesktop(_ m: Machine, _ event: DesktopEvent)
     /// The machine settings changed on some device.
     func onSettings(_ m: Machine)
+    /// An agent collaboration request changed (mobd with "agentCollaboration").
+    func onCollab(_ m: Machine, _ r: CollabRequest)
 }
 
 /// Follows one machine's GET /events (session summaries) and remembers the last summary of
@@ -68,6 +70,10 @@ final class MachineWatcher {
                             if let ev = DesktopEvent.parse(type: e.type, data: e.data) { events.onDesktop(machine, ev) }
                         case "settings":
                             events.onSettings(machine)
+                        case "collab":
+                            if let data = e.data.data(using: .utf8), let r = try? APIClient.decoder.decode(CollabRequest.self, from: data) {
+                                events.onCollab(machine, r)
+                            }
                         case "reset":
                             Log.add("\(machine.name): events reset, refetching")
                             try await self.seed(client)
