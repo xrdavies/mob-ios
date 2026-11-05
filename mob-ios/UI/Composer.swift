@@ -12,6 +12,11 @@ struct Composer: View {
     @State private var picked: [PhotosPickerItem] = []
     /// The agent whose settings the model menu's "Edit models…" opened.
     @State private var editingAgent: String?
+    /// Every conversation, archived ones included, for the "@" picker and resolving typed mentions.
+    @State private var agents: [Session] = []
+    /// A picked conversation without a handle, with the one suggested for it.
+    @State private var naming: (session: Session, handle: String?)?
+    @State private var mentionError: String?
     @FocusState private var focused: Bool
 
     private var chat: ChatStore { app.chat }
@@ -61,6 +66,16 @@ struct Composer: View {
             if attachments.contains(where: { $0.error != nil }) {
                 Text("An image could not be uploaded. Remove it and attach it again before sending.")
                     .font(.caption).foregroundStyle(.red)
+            }
+            if app.collaboration, let query = Collab.mentionQuery(text) {
+                MentionPicker(candidates: Mentions.candidates(agents.isEmpty ? chat.sessions : agents, query: query, excluding: chat.currentId),
+                              naming: naming, onPick: pick,
+                              onName: nameAndMention,
+                              onPlain: { if let s = naming?.session { insertMention(Collab.shortId(s.id), id: s.id) } },
+                              onBack: { naming = nil })
+            }
+            if let mentionError {
+                Text(mentionError).font(.caption).foregroundStyle(.red)
             }
             TextField(placeholder(canSteer: canSteer, busy: busy), text: $draft.text, axis: .vertical)
                 .accessibilityIdentifier("composer")
@@ -126,6 +141,11 @@ struct Composer: View {
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(.bar)
         .onChange(of: picked) { load(picked) }
+        .onChange(of: draft.text) {
+            naming = nil
+            mentionError = nil
+            if app.collaboration, agents.isEmpty, Collab.mentionQuery(draft.text) != nil { loadAgents() }
+        }
         // "Edit models…": this machine's agent settings, at the chat's agent.
         .sheet(isPresented: Binding(get: { editingAgent != nil }, set: { if !$0 { editingAgent = nil } })) {
             if let m = app.activeMachine {
@@ -135,6 +155,36 @@ struct Composer: View {
                 }
             }
         }
+    }
+
+    private func loadAgents() {
+        Task { agents = await chat.allAgents() }
+    }
+
+    /// Picks an agent; one without a handle is offered a name first.
+    private func pick(_ c: MentionCandidate) {
+        if let h = c.session.handle, !h.isEmpty { return insertMention(h, id: c.session.id) }
+        let taken = Set((agents.isEmpty ? chat.sessions : agents).compactMap(\.handle))
+        naming = (c.session, Handle.suggest(from: c.session.displayTitle, taken: taken))
+    }
+
+    /// Gives the picked conversation its suggested handle, then mentions it by that handle.
+    private func nameAndMention() {
+        guard let naming, let handle = naming.handle else { return }
+        let id = naming.session.id
+        chat.setHandle(naming.session, handle) { e in
+            if let e { mentionError = e.message; return }
+            insertMention(handle, id: id)
+            loadAgents()
+        }
+    }
+
+    /// Replaces the @ word at the end of the text with `word`, remembering whom it names.
+    private func insertMention(_ word: String, id: String) {
+        naming = nil
+        guard let query = Collab.mentionQuery(draft.text) else { return }
+        draft.text = String(draft.text.dropLast(query.count)) + word + " "
+        draft.picked[word] = id
     }
 
     private func placeholder(canSteer: Bool, busy: Bool) -> String {
@@ -155,9 +205,18 @@ struct Composer: View {
             return
         }
         guard !busy, !uploading, draft.attachmentsReady else { return }
+        var mentions: [String] = []
+        if app.collaboration {
+            switch Mentions.resolve(text: prompt, picked: draft.picked, sessions: agents.isEmpty ? chat.sessions : agents, current: chat.currentId) {
+            case .ok(let ids): mentions = ids
+            case .blocked(let why):
+                mentionError = why
+                return
+            }
+        }
         // Keep the draft until accepted, so a failed request never loses text or images.
         draft.beginSending()
-        chat.send(prompt, runner: runner, model: model, effort: effort, attachments: draft.attachments.compactMap(\.uploadId)) { ok in
+        chat.send(prompt, runner: runner, model: model, effort: effort, attachments: draft.attachments.compactMap(\.uploadId), mentions: mentions) { ok in
             draft.finishSending(ok)
             // The conversation has its settings now; the next new chat starts from the defaults.
             if ok, let clearDraft { app.clearTurnPrefs(machine: clearDraft.machine, runnerKey: clearDraft.runnerKey) }
