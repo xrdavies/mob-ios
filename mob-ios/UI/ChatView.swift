@@ -221,6 +221,10 @@ private struct ChatTimeline: View {
             .modifier(ChatScrollPosition(atBottom: $atBottom, items: items))
             .accessibilityIdentifier("chatTimeline")
             .scrollDismissesKeyboard(.interactively)
+            // A tap on the history hides the keyboard, as in Messages; links and buttons still work.
+            .simultaneousGesture(TapGesture().onEnded {
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            })
             // The working row keeps its ID as replies grow; follow content only while at the bottom.
             .onChange(of: items) { if atBottom { proxy.scrollTo("bottom", anchor: .bottom) } }
             .onChange(of: outgoing) { if outgoing != nil { proxy.scrollTo("bottom", anchor: .bottom) } }

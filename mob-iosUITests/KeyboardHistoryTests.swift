@@ -47,6 +47,30 @@ final class KeyboardHistoryTests: XCTestCase {
         XCTAssertLessThan(abs(moved), 60, "the keyboard moved the text being read by \(Int(moved))pt")
     }
 
+    /// A tap on the history hides the keyboard; the history stays where it was.
+    func testTappingTheHistoryHidesTheKeyboard() throws {
+        guard let chat = ProcessInfo.processInfo.environment["MOBD_OTHER_CHAT"], !chat.isEmpty else {
+            throw XCTSkip("Set MOBD_OTHER_CHAT to a conversation title")
+        }
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launch()
+        open(app, chat)
+        let composer = app.descendants(matching: .any)["composer"].firstMatch
+        let timeline = app.scrollViews["chatTimeline"]
+        for round in 1...3 {
+            composer.tap()
+            if !app.keyboards.firstMatch.waitForExistence(timeout: 3) { composer.tap() }
+            XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), "no software keyboard; turn off the hardware keyboard")
+            sleep(1)
+            timeline.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
+            let gone = NSPredicate(format: "exists == false")
+            let hidden = XCTNSPredicateExpectation(predicate: gone, object: app.keyboards.firstMatch)
+            XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 3), .completed, "round \(round): the keyboard stayed after tapping the history")
+            XCTAssertGreaterThan(texts(app, timeline, above: composer.frame.minY, near: 400), 0, "round \(round): history blank after the keyboard hid")
+        }
+    }
+
     private func open(_ app: XCUIApplication, _ title: String) {
         let chats = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Chats'")).firstMatch
         XCTAssertTrue(chats.waitForExistence(timeout: 15))
