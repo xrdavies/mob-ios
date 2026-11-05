@@ -265,19 +265,28 @@ struct MentionPicker: View {
         }
     }
 
+    @ViewBuilder private func namingButtons(_ s: Session, _ handle: String?) -> some View {
+        if let handle {
+            Button { onName() } label: {
+                (Text("Name it ") + Text("@\(handle)").monospaced()).font(.caption).lineLimit(1).fixedSize()
+            }
+            .buttonStyle(.borderedProminent).controlSize(.small)
+        }
+        Button { onPlain() } label: {
+            (Text("Mention as ") + Text("@\(Collab.shortId(s.id))").monospaced()).font(.caption).lineLimit(1).fixedSize()
+        }
+        .buttonStyle(.bordered).controlSize(.small)
+        Button("Back", action: onBack).font(.caption).fixedSize()
+    }
+
     private func namingPanel(_ s: Session, _ handle: String?) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Give \(s.displayTitle) a handle?").font(.subheadline).lineLimit(2)
             Text("You and other agents can then mention it by name instead of its ID.").font(.caption).foregroundStyle(.secondary)
-            HStack(spacing: 8) {
-                if let handle {
-                    Button { onName() } label: { Text("Name it @\(handle)").font(.caption.monospaced()) }
-                        .buttonStyle(.borderedProminent).controlSize(.small)
-                }
-                Button { onPlain() } label: { Text("Mention as @\(Collab.shortId(s.id))").font(.caption.monospaced()) }
-                    .buttonStyle(.bordered).controlSize(.small)
-                Spacer()
-                Button("Back", action: onBack).font(.caption)
+            // Side by side when they fit, else stacked, so neither label is cut off.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { namingButtons(s, handle); Spacer(minLength: 0) }
+                VStack(alignment: .leading, spacing: 6) { namingButtons(s, handle) }
             }
         }
         .padding(12)
