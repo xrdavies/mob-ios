@@ -54,8 +54,11 @@ shared implementation contract is defined.
 
 ## Status: iOS (feat/agent-collab-core)
 
-Built against mobd's `feat/agent-collab-core` API, matching Desktop's design. Unit tests pass;
-not yet checked against a real mobd on a simulator or device.
+Built against mobd's `feat/agent-collab-core` API, matching Desktop's design. Unit tests pass.
+Checked on the iPhone 17 Pro simulator against the office mobd running that branch (2026-11-06):
+the timeline with peer messages, chips and step titles, the grouped picker and its naming step,
+and the handle sheet (new handle, a broken rule, a handle another conversation holds). Not checked
+there: starting an exchange from the phone, naming or moving a handle for real, a clarification.
 
 - **Handles:** the badge shows next to the title; the chat list's menu opens a sheet with a fixed
   `@`, input kept to allowed characters, the rule explained as you type, a suggested handle, and an
