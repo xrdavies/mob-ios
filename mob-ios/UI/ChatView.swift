@@ -1,3 +1,4 @@
+import UIKit
 import SwiftUI
 
 struct ChatView: View {
@@ -225,6 +226,50 @@ private struct ChatTimeline: View {
             .onChange(of: outgoing) { if outgoing != nil { proxy.scrollTo("bottom", anchor: .bottom) } }
             .onChange(of: pendingQuestion) { if let pendingQuestion { proxy.scrollTo(pendingQuestion, anchor: .bottom) } }
             .modifier(LoadOlderNearTop(chat: chat))
+            .modifier(FollowEnd(atBottom: atBottom, proxy: proxy))
+        }
+    }
+}
+
+/// Keeps the end of the conversation in view, measured on the real bottom row (mob-ios#8). The lazy
+/// stack only estimates rows it has not laid out, and a message taller than the screen makes that
+/// estimate far off: opened at the bottom of the estimate, or with the keyboard re-estimating it,
+/// the view showed only space past the last message until it was scrolled.
+private struct FollowEnd: ViewModifier {
+    let atBottom: Bool
+    let proxy: ScrollViewProxy
+    /// At the end when the keyboard started to move; while it moves, the estimate can say otherwise.
+    @State private var wasAtEnd = false
+
+    func body(content: Content) -> some View {
+        content
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { _ in
+                wasAtEnd = atBottom
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidChangeFrameNotification)) { _ in
+                if wasAtEnd { proxy.scrollTo("bottom", anchor: .bottom) }
+            }
+            .modifier(FollowEndOnResize(atBottom: atBottom, wasAtEnd: wasAtEnd, proxy: proxy))
+    }
+}
+
+/// iOS 18: also while the content or the visible area changes size (rows laid out, the keyboard
+/// moving), so the end never shows past the last message.
+private struct FollowEndOnResize: ViewModifier {
+    let atBottom: Bool
+    let wasAtEnd: Bool
+    let proxy: ScrollViewProxy
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.onScrollGeometryChange(for: CGSize.self) {
+                CGSize(width: $0.containerSize.height, height: $0.contentSize.height)
+            } action: { old, new in
+                // Only the visible area or the content changed size; a scroll does not count.
+                if old != new, atBottom || wasAtEnd { proxy.scrollTo("bottom", anchor: .bottom) }
+            }
+        } else {
+            content
         }
     }
 }
@@ -632,3 +677,4 @@ struct SessionList: View {
         else { Image(systemName: "bubble.left").foregroundStyle(.secondary) }
     }
 }
+
