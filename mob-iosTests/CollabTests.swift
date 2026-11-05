@@ -102,4 +102,55 @@ final class CollabTests: XCTestCase {
         for s in ["open", "in_progress", "needs_clarification"] { XCTAssertTrue(r(s).isOpen, s) }
         for s in ["answered", "failed", "cancelled"] { XCTAssertFalse(r(s).needsUser || r(s).isOpen, s) }
     }
+
+    func testHandleProblemMatchesDesktopAndValidity() {
+        XCTAssertEqual(Collab.handleProblem("order-api"), "")
+        XCTAssertEqual(Collab.handleProblem("a"), "At least 2 characters.")
+        XCTAssertEqual(Collab.handleProblem("1api"), "Start with a letter.")
+        XCTAssertEqual(Collab.handleProblem("cafe"), "Only 0–9 and a–f reads as a conversation ID; add another letter.")
+        XCTAssertEqual(Collab.handleProblem("here"), "@here is reserved.")
+        for h in ["api", "a", "1api", "cafe", "here", String(repeating: "x", count: 33)] {
+            XCTAssertEqual(Collab.handleProblem(h).isEmpty, Handle.isValid(h), h)
+        }
+        XCTAssertEqual(Collab.normalizeHandleInput("@Order Service_v2!"), "order-service-v2")
+    }
+
+    func testMentionSegmentsMarkKnownAgentsOnly() {
+        let sessions = [session("2ead98c31b", "B", handle: "heron"), session("b9b040ee85", "off road"), session("ea7b1322", "A", handle: "asker")]
+        let segs = Collab.mentionSegments("ask @heron and @b9b040, not @nobody or @asker.", sessions: sessions, current: "ea7b1322")
+        XCTAssertEqual(segs, [
+            .init(text: "ask ", session: nil), .init(text: "@heron", session: "2ead98c31b"), .init(text: " and ", session: nil),
+            .init(text: "@b9b040", session: "b9b040ee85"), .init(text: ", not @nobody or @asker.", session: nil),
+        ])
+        XCTAssertEqual(segs.map(\.text).joined(), "ask @heron and @b9b040, not @nobody or @asker.")
+    }
+
+    func testMentionQueryIsTheWordBeingTyped() {
+        XCTAssertEqual(Collab.mentionQuery("ask @her"), "her")
+        XCTAssertEqual(Collab.mentionQuery("@"), "")
+        XCTAssertNil(Collab.mentionQuery("mail me@example"))
+        XCTAssertNil(Collab.mentionQuery("ask @heron now"))
+    }
+
+    func testDeliveriesReadWithoutMobdsInstructions() throws {
+        let r = try JSONDecoder().decode(CollabRequest.self, from: Data(#"{"id":"r-1","from":"A","to":"B","text":"q","status":"failed"}"#.utf8))
+        let result = Delivery(id: "d", to: "A", requestId: "r-1", kind: "result", text: "no")
+        XCTAssertEqual(Collab.sender(result, r), "B")
+        XCTAssertEqual(Collab.sender(Delivery(id: "d", to: "B", requestId: "r-1", kind: "request", text: "q"), r), "A")
+        XCTAssertNil(Collab.sender(Delivery(id: "d", to: "A", requestId: "r-1", kind: "notice", text: "x"), r))
+        XCTAssertEqual(Collab.label(result, r), "couldn't complete your request")
+        XCTAssertEqual(Collab.deliveryBody("Request: Reply okay.\n\nWhen done, call complete_request(\"r-1\", \"answered\" | \"failed\", <result>)."), "Reply okay.")
+        XCTAssertEqual(Collab.deliveryBody("Result of your request \"Reply\" to @heron (answered):\nokay"), "okay")
+        let parts = Collab.parseDelivery("Preamble.\n\n[Mob collaboration · from @heron · request r-1 · exchange x-1]\nResult of your request \"q\" to @heron (answered):\nokay")
+        XCTAssertEqual(parts.first?.from, "@heron")
+        XCTAssertEqual(parts.first?.body, "okay")
+    }
+
+    func testStepTitlesAndShortLabels() {
+        let sessions = [session("2ead98c31b", "B", handle: "heron")]
+        XCTAssertEqual(Collab.stepTitle(server: "mob-mcp", tool: "send_request", arguments: ["to": .string("2ead98"), "request": .string("x")], sessions: sessions), "Asked @heron: x")
+        XCTAssertEqual(Collab.stepTitle(server: "mob-mcp", tool: "complete_request", arguments: ["outcome": .string("answered"), "result": .string("BLUE")], sessions: []), "Replied: BLUE")
+        XCTAssertNil(Collab.stepTitle(server: "mob-mcp", tool: "screenshot", arguments: nil, sessions: []))
+        XCTAssertEqual(Collab.shortLabel(session("962ae4ff", String(repeating: "x", count: 40))), String(repeating: "x", count: 31) + "… (962ae4)")
+    }
 }

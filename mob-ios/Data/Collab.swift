@@ -8,8 +8,19 @@ struct TurnOrigin: Codable, Hashable {
     var kind: String
     var exchangeId: String?
     var requests: [String]?
+    /// What a collab turn carried, in order (mobd's inbox items).
+    var deliveries: [Delivery]?
 
     var isCollab: Bool { kind == "collab" }
+}
+
+/// One message mobd delivered to an agent: a request, a clarification, its answer, a result or a notice.
+struct Delivery: Codable, Hashable {
+    let id: String
+    let to: String?
+    let requestId: String?
+    let kind: String
+    let text: String
 }
 
 struct CollabNote: Codable, Hashable {
@@ -176,5 +187,164 @@ enum Mentions {
             return .blocked("@\(s.handle ?? s.displayTitle) is archived. Unarchive it first.")
         }
         return .ok(ids)
+    }
+}
+
+// Shared with Desktop's src/lib/collab.ts: the same rules and words on every app.
+enum Collab {
+    private static let hex = Set("0123456789abcdef")
+    private static let handleChars = Set("abcdefghijklmnopqrstuvwxyz0123456789-")
+    private static let reserved: Set<String> = ["all", "everyone", "here", "user", "me", "mob", "mobd", "system"]
+
+    static func isHex(_ s: String) -> Bool { !s.isEmpty && s.allSatisfy { hex.contains($0) } }
+    static func shortId(_ id: String) -> String { String(id.prefix(6)) }
+
+    /// Why `h` cannot be a handle, in words for the user; "" when it can.
+    static func handleProblem(_ h: String) -> String {
+        if h.count < 2 { return "At least 2 characters." }
+        if h.count > 32 { return "At most 32 characters." }
+        guard let f = h.first, f.isASCII, f.isLetter, f.isLowercase else { return "Start with a letter." }
+        if !h.allSatisfy({ handleChars.contains($0) }) { return "Use lowercase letters, digits and -." }
+        if isHex(h) { return "Only 0–9 and a–f reads as a conversation ID; add another letter." }
+        if reserved.contains(h) { return "@\(h) is reserved." }
+        return ""
+    }
+
+    /// What the handle field keeps of typed text: lowercase, no leading @, spaces and _ as -.
+    static func normalizeHandleInput(_ s: String) -> String {
+        var t = s.lowercased()
+        while t.hasPrefix("@") { t.removeFirst() }
+        var out = ""
+        var gap = false
+        for c in t {
+            if c.isWhitespace || c == "_" { gap = true; continue }
+            if gap { out.append("-"); gap = false }
+            if handleChars.contains(c) { out.append(c) }
+        }
+        if gap { out.append("-") }
+        return String(out.prefix(32))
+    }
+
+    /// An agent's name where space is short: "@handle", else its title cut to `max` characters with a short ID.
+    static func shortLabel(_ s: Session, max: Int = 32) -> String {
+        if let h = s.handle, !h.isEmpty { return "@\(h)" }
+        let t = s.displayTitle
+        let cut = t.count > max ? String(t.prefix(max - 1)).trimmingCharacters(in: .whitespaces) + "…" : t
+        return "\(cut) (\(shortId(s.id)))"
+    }
+
+    /// The conversation an @word names: a handle, or a unique short ID of 6+ hex characters.
+    static func resolve(_ word: String, in sessions: [Session]) -> Session? {
+        let w = word.lowercased()
+        if let s = sessions.first(where: { $0.handle == w }) { return s }
+        guard w.count >= 6, isHex(w) else { return nil }
+        let byId = sessions.filter { $0.id.hasPrefix(w) }
+        return byId.count == 1 ? byId[0] : nil
+    }
+
+    struct Segment: Equatable {
+        let text: String
+        /// The session this mention names; nil for plain text.
+        let session: String?
+    }
+
+    /// Text split into plain runs and @mentions of other conversations, for chips and highlighting.
+    static func mentionSegments(_ text: String, sessions: [Session], current: String?) -> [Segment] {
+        var out: [Segment] = []
+        var plain = ""
+        var i = text.startIndex
+        while i < text.endIndex {
+            let c = text[i]
+            let before = i == text.startIndex ? nil : text[text.index(before: i)]
+            if c == "@", before == nil || before!.isWhitespace {
+                let start = text.index(after: i)
+                let end = text[start...].firstIndex { !handleChars.contains(Character($0.lowercased())) } ?? text.endIndex
+                let word = String(text[start..<end])
+                let next = end == text.endIndex ? nil : text[end]
+                let boundary = next == nil || next!.isWhitespace || ".,;:!?)".contains(next!)
+                if (2...32).contains(word.count), boundary, let s = resolve(word, in: sessions), s.id != current {
+                    if !plain.isEmpty { out.append(Segment(text: plain, session: nil)); plain = "" }
+                    out.append(Segment(text: "@" + word, session: s.id))
+                    i = end
+                    continue
+                }
+            }
+            plain.append(c)
+            i = text.index(after: i)
+        }
+        if !plain.isEmpty { out.append(Segment(text: plain, session: nil)) }
+        return out
+    }
+
+    /// The `@word` being typed at the end of `text` (SwiftUI's field gives no caret), or nil.
+    static func mentionQuery(_ text: String) -> String? {
+        guard let at = text.lastIndex(of: "@") else { return nil }
+        if at != text.startIndex, !text[text.index(before: at)].isWhitespace { return nil }
+        let word = text[text.index(after: at)...]
+        guard word.allSatisfy({ handleChars.contains(Character($0.lowercased())) }) else { return nil }
+        return word.lowercased()
+    }
+
+    /// Who a delivery is from, by session ID: the requester for requests and answers, else the recipient.
+    static func sender(_ d: Delivery, _ r: CollabRequest) -> String? {
+        if d.kind == "notice" { return nil }
+        return d.kind == "request" || d.kind == "answer" ? r.from : r.to
+    }
+
+    /// What a delivery says about itself, after the sender's name.
+    static func label(_ d: Delivery, _ r: CollabRequest?) -> String {
+        switch d.kind {
+        case "request": return "asks"
+        case "clarification": return "needs clarification"
+        case "answer": return "answered your question"
+        case "result": return r?.status == "failed" ? "couldn't complete your request" : "replied"
+        default: return ""
+        }
+    }
+
+    /// A delivered message's text without mobd's instructions to the recipient (prompts without deliveries).
+    static func deliveryBody(_ body: String) -> String {
+        var b = body
+        if b.hasPrefix("Request: ") { b.removeFirst("Request: ".count) }
+        for marker in ["\n\nWhen done, call complete_request(", "\n\nAnswer with answer_clarification("] {
+            if let r = b.range(of: marker) { b = String(b[..<r.lowerBound]) }
+        }
+        // mobd's result header is one line: "Result of your request "…" to @b (answered):".
+        if b.hasPrefix("Result of your request \""), let nl = b.firstIndex(of: "\n") { b = String(b[b.index(after: nl)...]) }
+        return b.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// A delivered turn's prompt split into its messages: who sent each and the text.
+    static func parseDelivery(_ prompt: String) -> [(from: String, body: String)] {
+        prompt.components(separatedBy: "\n\n---\n\n").compactMap { part in
+            guard let h = part.range(of: "[Mob collaboration · from "), let end = part.range(of: "]\n", range: h.upperBound..<part.endIndex) else { return nil }
+            let header = part[h.upperBound..<end.lowerBound]
+            guard let sep = header.range(of: " · request ") else { return nil }
+            return (String(header[..<sep.lowerBound]), deliveryBody(String(part[end.upperBound...])))
+        }
+    }
+
+    /// A readable title for a collaboration tool step, or nil for other steps.
+    static func stepTitle(server: String?, tool: String?, arguments: [String: JSONValue]?, sessions: [Session]) -> String? {
+        guard server == "mob-mcp" else { return nil }
+        func arg(_ k: String) -> String { if case .string(let v)? = arguments?[k] { return v }; return "" }
+        var to = arg("to").lowercased()
+        while to.hasPrefix("@") { to.removeFirst() }
+        let who = resolve(to, in: sessions).map { shortLabel($0) } ?? (to.isEmpty ? "an agent" : isHex(to) ? to : "@\(to)")
+        switch tool {
+        case "send_request": return "Asked \(who): \(arg("request"))"
+        case "ask_clarification": return "Asked for clarification: \(arg("text"))"
+        case "answer_clarification": return "Answered the clarification: \(arg("text"))"
+        case "complete_request": return arg("outcome") == "failed" ? "Reported it couldn't: \(arg("result"))" : "Replied: \(arg("result"))"
+        case "list_collaborators": return "Looked up the mentioned agents"
+        default: return nil
+        }
+    }
+
+    /// A stable hue (0–1) for an agent, so it keeps its colour everywhere.
+    static func hue(_ id: String) -> Double {
+        var h = 0
+        for u in id.unicodeScalars { h = (h * 31 + Int(u.value)) % 360 }
+        return Double(h) / 360
     }
 }

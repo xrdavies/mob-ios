@@ -11,7 +11,8 @@ struct TimelineRow: View {
 
     var body: some View {
         switch item {
-        case .user(_, let m, let task): UserMessage(message: m, task: task)
+        case .user(_, let m, let task):
+            if task?.origin?.isCollab == true { PeerMessage(message: m, task: task) } else { UserMessage(message: m, task: task) }
         case .assistant(_, let m):
             let task = app.chat.detail?.tasks.first { $0.id == m.taskId }
             AssistantMessage(message: m, runner: task?.runner ?? runner, model: task?.modelLabel ?? "Model not reported")
@@ -48,7 +49,7 @@ private struct WorkingRow: View {
                         Text("Waiting for your answer").foregroundStyle(Color.waiting)
                     } else {
                         ProgressView().controlSize(.mini)
-                        Text((["Working", time] + [latest?.title].compactMap { $0 }).filter { !$0.isEmpty }.joined(separator: " · "))
+                        Text((["Working", time] + [latest?.stepTitle(app.chat.sessions)].compactMap { $0 }).filter { !$0.isEmpty }.joined(separator: " · "))
                             .foregroundStyle(Color.accentColor)
                     }
                 }
@@ -76,7 +77,7 @@ private struct UserMessage: View {
                 }
                 .frame(maxWidth: 300).fixedSize(horizontal: true, vertical: false)
             }
-            Text(message.content)
+            MentionText(text: message.content)
                 .padding(.horizontal, 14).padding(.vertical, 10)
                 .foregroundStyle(.white)
                 .background(Color.accentColor, in: UnevenRoundedRectangle(topLeadingRadius: 18, bottomLeadingRadius: 18, bottomTrailingRadius: 4, topTrailingRadius: 18))
@@ -137,6 +138,7 @@ private func icon(_ a: Activity) -> String {
 
 /// One agent step: tool call, command, reasoning, plan, file change, search or notice. Tap for details.
 struct ActivityRow: View {
+    @Environment(AppState.self) private var app
     let a: Activity
     @State private var open = false
 
@@ -153,7 +155,7 @@ struct ActivityRow: View {
                         else { Image(systemName: icon(a)).foregroundStyle(notice ? Color.waiting : .secondary) }
                     }
                     .font(.caption).frame(width: 18)
-                    Text(a.title).font(.subheadline).lineLimit(1)
+                    Text(a.stepTitle(app.chat.sessions)).font(.subheadline).lineLimit(1)
                         .italic(a.kind == "reasoning")
                         .foregroundStyle(notice ? Color.waiting : a.kind == "reasoning" ? .secondary : .primary)
                     Spacer(minLength: 4)
@@ -241,6 +243,7 @@ private struct ActivityDetails: View {
 
 /// Three or more consecutive steps, folded: "5 steps · 0:42 · latest step".
 private struct ActivityGroup: View {
+    @Environment(AppState.self) private var app
     let activities: [Activity]
     @State private var open = false
 
@@ -255,7 +258,7 @@ private struct ActivityGroup: View {
                     Text("\(activities.count) steps").font(.subheadline.weight(.medium))
                     Text("· \(duration(activities.first?.startedAt, latest.updatedAt))").font(.caption).foregroundStyle(.secondary)
                     if failed > 0 { Text("· \(failed) failed").font(.caption).foregroundStyle(.red) }
-                    Text(open ? "" : latest.title).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text(open ? "" : latest.stepTitle(app.chat.sessions)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         .frame(maxWidth: .infinity, alignment: .trailing)
                     Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary).rotationEffect(.degrees(open ? 90 : 0))
                 }
@@ -423,5 +426,12 @@ struct OutgoingMessage: View {
         .frame(maxWidth: .infinity, alignment: .trailing)
         .padding(.leading, 48)
         .accessibilityLabel("Sending: \(text)")
+    }
+}
+
+extension Activity {
+    /// "Asked @heron: …" for collaboration steps, else the step's own title.
+    func stepTitle(_ sessions: [Session]) -> String {
+        Collab.stepTitle(server: server, tool: tool, arguments: arguments, sessions: sessions) ?? title
     }
 }
