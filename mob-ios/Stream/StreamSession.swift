@@ -220,7 +220,11 @@ final class StreamSession {
             graceTask = Task { [weak self] in
                 try? await Task.sleep(for: grace)
                 guard !Task.isCancelled, let self, self.attempt == a else { return }
-                self.startWs?(preferWebSocket)
+                // Already connecting (a relayed path, seconds per round trip): keep WebRTC and race the
+                // WebSocket beside it. Dropping it here lost sessions that connected a moment later.
+                let connecting = self.pc?.connectionState == .connecting
+                if connecting { Log.add("live view: WebRTC still connecting after \(self.ms()) ms, racing the WebSocket") }
+                self.startWs?(preferWebSocket || connecting)
             }
             guard var sdp = answer.answer, !sdp.isEmpty else { return startWs?(false) ?? () }
             if blockWebRTC { sdp = withoutCandidates(sdp) }
@@ -243,12 +247,15 @@ final class StreamSession {
     /// The offer's candidates, e.g. "candidates: host 100.94.60.46 udp cost 50, host 10.1.2.3 udp cost 900".
     /// network-cost is libwebrtc's: 10 Wi-Fi/LAN, 50 VPN, 900 cellular.
     nonisolated static func candidateSummary(_ sdp: String) -> String {
+        var seen = Set<String>()
+        // One list per media section, the same each time: each candidate once.
         let list = sdp.components(separatedBy: "\r\n").compactMap { line -> String? in
             guard line.hasPrefix("a=candidate:") else { return nil }
             let f = line.split(separator: " ").map(String.init)
             guard f.count >= 8 else { return nil }
             let cost = f.firstIndex(of: "network-cost").flatMap { $0 + 1 < f.count ? f[$0 + 1] : nil }
-            return "\(f[7]) \(f[4]) \(f[2].lowercased())" + (cost.map { " cost \($0)" } ?? "")
+            let text = "\(f[7]) \(f[4]) \(f[2].lowercased())" + (cost.map { " cost \($0)" } ?? "")
+            return seen.insert(text).inserted ? text : nil
         }
         return list.isEmpty ? "no candidates" : "candidates: " + list.joined(separator: ", ")
     }
