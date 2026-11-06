@@ -31,10 +31,10 @@ final class CollabStore {
         }
     }
 
-    func cancel(_ id: String, client: APIClient, done: @escaping (Bool) -> Void = { _ in }) {
+    func cancel(_ id: String, client: APIClient, stopTurn: Bool = false, done: @escaping (Bool) -> Void = { _ in }) {
         Task { @MainActor in
             do {
-                let updated = try await client.cancelCollab(id)
+                let updated = try await client.cancelCollab(id, stopTurn: stopTurn)
                 if let i = list.firstIndex(where: { $0.id == id }) { list[i] = updated }
                 done(true)
             } catch {
