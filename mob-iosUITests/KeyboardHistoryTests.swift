@@ -36,14 +36,16 @@ final class KeyboardHistoryTests: XCTestCase {
         sleep(2)
         // A line shown once, so it can be found again after the keyboard opens.
         let anchor = timeline.staticTexts.allElementsBoundByIndex.first {
-            $0.frame.minY > timeline.frame.minY + 120 && $0.frame.height > 0 && !$0.label.isEmpty && app.staticTexts.matching(identifier: $0.label).count == 1
+            $0.frame.minY > timeline.frame.minY + 120 && $0.frame.height > 0 && !$0.label.isEmpty
+                && app.staticTexts.matching(NSPredicate(format: "label == %@", $0.label)).count == 1
         }
         let label = try XCTUnwrap(anchor?.label)
-        let before = app.staticTexts[label].frame.minY
+        let text = app.staticTexts.matching(NSPredicate(format: "label == %@", label)).firstMatch
+        let before = text.frame.minY
         composer.tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         sleep(1)
-        let moved = app.staticTexts[label].frame.minY - before
+        let moved = text.frame.minY - before
         XCTAssertLessThan(abs(moved), 60, "the keyboard moved the text being read by \(Int(moved))pt")
     }
 
@@ -71,12 +73,53 @@ final class KeyboardHistoryTests: XCTestCase {
         }
     }
 
+    /// After typing a draft and hiding the keyboard, scrolling up stays up (mob-ios#9).
+    func testScrollingUpAfterHidingTheKeyboardIsNotPulledBack() throws {
+        guard let chat = ProcessInfo.processInfo.environment["MOBD_OTHER_CHAT"], !chat.isEmpty else {
+            throw XCTSkip("Set MOBD_OTHER_CHAT to a conversation title")
+        }
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launch()
+        open(app, chat)
+        let composer = app.descendants(matching: .any)["composer"].firstMatch
+        let timeline = app.scrollViews["chatTimeline"]
+        composer.tap()
+        if !app.keyboards.firstMatch.waitForExistence(timeout: 3) { composer.tap() }
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), "no software keyboard; turn off the hardware keyboard")
+        composer.typeText("draft, not sent")
+        timeline.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
+        let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.keyboards.firstMatch)
+        XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 3), .completed, "the keyboard stayed")
+        sleep(1)
+        // Small slow drags up, as a reader does: each must move the text by the drag and stay there
+        // while rows are laid out, not snap back to the end.
+        for step in 1...8 {
+            guard let anchor = timeline.staticTexts.allElementsBoundByIndex.first(where: {
+                $0.frame.minY > timeline.frame.minY + 150 && $0.frame.height > 0 && !$0.label.isEmpty
+                    && app.staticTexts.matching(NSPredicate(format: "label == %@", $0.label)).count == 1
+            }) else { XCTFail("nothing to follow at step \(step)"); return }
+            let text = app.staticTexts.matching(NSPredicate(format: "label == %@", anchor.label)).firstMatch
+            let before = text.frame.minY
+            let start = timeline.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 250)), withVelocity: .slow, thenHoldForDuration: 0.2)
+            usleep(1_200_000)
+            XCTAssertTrue(text.exists && text.frame.height > 0, "step \(step): the line left, the timeline went back to the end")
+            let moved = text.frame.minY - before
+            XCTAssertGreaterThan(moved, 150, "step \(step): the text moved \(Int(moved))pt for a 250pt drag up: pulled back toward the end")
+        }
+        composer.tap()
+        composer.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 20))
+    }
+
     private func open(_ app: XCUIApplication, _ title: String) {
         let chats = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Chats'")).firstMatch
         XCTAssertTrue(chats.waitForExistence(timeout: 15))
         chats.tap()
         let row = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", title)).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 10))
+        // Newer chats can push it under the bottom of the list.
+        for _ in 0..<5 where !row.isHittable { app.swipeUp(velocity: .slow) }
         row.tap()
         sleep(3)
     }

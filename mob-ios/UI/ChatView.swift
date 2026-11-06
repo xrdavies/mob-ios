@@ -243,6 +243,7 @@ private struct FollowEnd: ViewModifier {
     let atBottom: Bool
     let proxy: ScrollViewProxy
     /// At the end when the keyboard started to move; while it moves, the estimate can say otherwise.
+    /// Only for that move: kept afterwards, it pulled a reader scrolling up back to the end (mob-ios#9).
     @State private var wasAtEnd = false
 
     func body(content: Content) -> some View {
@@ -252,6 +253,7 @@ private struct FollowEnd: ViewModifier {
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidChangeFrameNotification)) { _ in
                 if wasAtEnd { proxy.scrollTo("bottom", anchor: .bottom) }
+                wasAtEnd = false
             }
             .modifier(FollowEndOnResize(atBottom: atBottom, wasAtEnd: wasAtEnd, proxy: proxy))
     }
