@@ -39,4 +39,4 @@ archive:
 
 test:
 	xcodebuild -project mob-ios.xcodeproj -scheme mob-ios \
-	  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:mob-iosTests test
+	  -destination 'platform=iOS Simulator,name=iPhone 18 Pro' -only-testing:mob-iosTests test
