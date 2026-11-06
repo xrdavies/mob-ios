@@ -260,8 +260,9 @@ final class APIClient {
     /// A conversation's collaboration requests (mobd with "agentCollaboration").
     func collab(session: String) async throws -> CollabList { try await get("collab", query: ["session": session]) }
 
-    func cancelCollab(_ requestId: String) async throws -> CollabRequest {
-        try APIClient.decoder.decode(CollabRequest.self, from: await send("POST", "collab/requests/\(requestId)/cancel"))
+    /// `stopTurn`: also stop the other agent's turn working on it (mobd keeps one handling another request).
+    func cancelCollab(_ requestId: String, stopTurn: Bool = false) async throws -> CollabRequest {
+        try APIClient.decoder.decode(CollabRequest.self, from: await send("POST", "collab/requests/\(requestId)/cancel\(stopTurn ? "?stopTurn=true" : "")"))
     }
 
     func cancel(_ taskId: String) async throws { _ = try await send("POST", "tasks/\(taskId)/cancel") }

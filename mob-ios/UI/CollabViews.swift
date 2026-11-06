@@ -198,8 +198,16 @@ struct CollabDetail: View {
                         Button("Cancel request", role: .destructive) {
                             app.collab.cancel(request.id, client: app.apiClient) { ok in if ok { dismiss() } }
                         }
+                        // Being handled: the other agent's turn keeps working unless it is stopped too.
+                        if request.status == "in_progress" {
+                            Button("Cancel and stop its turn", role: .destructive) {
+                                app.collab.cancel(request.id, client: app.apiClient, stopTurn: true) { ok in if ok { dismiss() } }
+                            }
+                        }
                     } footer: {
-                        Text("Stops waiting for this answer. The other agent is told it was cancelled.")
+                        Text(request.status == "in_progress"
+                             ? "Cancel request stops waiting for the answer; the other agent's turn keeps running. Cancel and stop its turn ends that turn too, unless it is also handling another request."
+                             : "Stops waiting for this answer. The other agent is told it was cancelled.")
                     }
                 }
             }
