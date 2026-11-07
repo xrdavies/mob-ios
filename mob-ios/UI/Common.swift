@@ -8,7 +8,8 @@ extension Color {
 
 /// Renders an agent reply: blocks from parseMarkdown, inline styling from AttributedString.
 struct MarkdownView: View {
-    let text: String
+    /// A message's blocks, or some of them: one timeline row of a long message (markdownChunks).
+    let blocks: [MdBlock]
 
     private func inline(_ s: String) -> AttributedString {
         (try? AttributedString(markdown: s, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(s)
@@ -16,7 +17,7 @@ struct MarkdownView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(parseMarkdown(text).enumerated()), id: \.offset) { _, block in
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 switch block {
                 case .heading(let level, let t):
                     Text(inline(t)).font(level <= 2 ? .headline : .subheadline.weight(.semibold))

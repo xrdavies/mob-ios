@@ -94,6 +94,30 @@ final class DataTests: XCTestCase {
         ])
     }
 
+    /// A long message is several timeline rows, each about `size` characters; nothing is lost or reordered.
+    func testMarkdownChunks() {
+        let short = parseMarkdown("One line.\n\n- a\n- b")
+        XCTAssertEqual(markdownChunks(short), [short])
+
+        let paragraphs = (1...6).map { i in String(repeating: "Word\(i) ", count: 30).trimmingCharacters(in: .whitespaces) + "." }
+        let chunks = markdownChunks(parseMarkdown(paragraphs.joined(separator: "\n\n")), size: 500)
+        XCTAssertEqual(chunks.flatMap { $0 }, paragraphs.map { .paragraph($0) })
+        XCTAssertGreaterThan(chunks.count, 1)
+
+        // A paragraph longer than a row is cut after sentences, a long code block every 20 lines.
+        let sentences = (1...40).map { "Sentence \($0) is here." }
+        let long = markdownChunks([.paragraph(sentences.joined(separator: " "))], size: 200)
+        XCTAssertGreaterThan(long.count, 1)
+        XCTAssertEqual(long.flatMap { $0 }.map { if case .paragraph(let t) = $0 { t } else { "" } }.joined(separator: " "), sentences.joined(separator: " "))
+        let code = (1...45).map { "line \($0)" }
+        let pieces = markdownChunks([.code(lang: "sh", text: code.joined(separator: "\n"))]).flatMap { $0 }
+        XCTAssertEqual(pieces, [
+            .code(lang: "sh", text: code[0..<20].joined(separator: "\n")),
+            .code(lang: "sh", text: code[20..<40].joined(separator: "\n")),
+            .code(lang: "sh", text: code[40..<45].joined(separator: "\n")),
+        ])
+    }
+
     func testSSEParser() {
         var p = SSEParser()
         var events: [SSEEvent] = []
