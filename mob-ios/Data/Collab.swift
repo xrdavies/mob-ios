@@ -314,6 +314,19 @@ enum Collab {
         return b.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// What a list of tasks shows for one. A collaboration turn's prompt is mobd's instructions to
+    /// the agent, not the user's words: it shows what was delivered ("Reply: …") instead.
+    static func taskTitle(_ task: AgentTask) -> String {
+        if task.origin?.isCollab == true {
+            if let d = task.origin?.deliveries?.first(where: { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+                let kind = ["request": "Request: ", "clarification": "Question: ", "answer": "Answer: ", "result": "Reply: "][d.kind] ?? ""
+                return kind + d.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            if let p = parseDelivery(task.prompt ?? "").first { return "\(p.from): \(p.body)" }
+        }
+        return task.prompt ?? ""
+    }
+
     /// A delivered turn's prompt split into its messages: who sent each and the text.
     static func parseDelivery(_ prompt: String) -> [(from: String, body: String)] {
         prompt.components(separatedBy: "\n\n---\n\n").compactMap { part in

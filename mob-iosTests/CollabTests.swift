@@ -8,6 +8,19 @@ final class CollabTests: XCTestCase {
         Session(id: id, title: title, runner: "codex", archived: archived, handle: handle)
     }
 
+    /// A collaboration turn is listed by what was delivered, not by mobd's instructions to the agent.
+    func testTaskTitles() throws {
+        var task = AgentTask(id: "t", sessionId: "s", runner: "codex", status: "succeeded")
+        task.prompt = "Fix the tests"
+        XCTAssertEqual(Collab.taskTitle(task), "Fix the tests")
+        task.prompt = "These messages come from other agents…"
+        task.origin = TurnOrigin(kind: "collab", deliveries: [Delivery(id: "d", to: "s", requestId: "r", kind: "result", text: " BLUE ")])
+        XCTAssertEqual(Collab.taskTitle(task), "Reply: BLUE")
+        task.prompt = "Preamble\n\n[Mob collaboration · from @heron · request r-1 · exchange x-1]\nRequest: What colour?"
+        task.origin = TurnOrigin(kind: "collab")
+        XCTAssertEqual(Collab.taskTitle(task), "@heron: What colour?")
+    }
+
     func testHandleRulesMatchMobd() {
         for ok in ["api", "order-service", "ui2", "x1", "x234567890123456789012345678901"] {
             XCTAssertTrue(Handle.isValid(ok), ok)
