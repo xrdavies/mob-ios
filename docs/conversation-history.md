@@ -85,6 +85,14 @@ the whole scroll view is anchored at the bottom, which keeps the text in place w
 added above; "at the end" is whether the bottom marker is on screen, so new content only scrolls
 down there.
 
+A long reply or message from another agent is several timeline rows of about 500 characters of
+Markdown each (`markdownChunks`: whole blocks, a long paragraph cut after a sentence, a code block
+every 20 lines), drawn as one message. The timeline is a lazy stack, which estimates the rows it has
+not laid out; one row far taller than that estimate could make it alternate between the row laid
+out and estimated in every layout while the end was followed or the keyboard moved, and the app
+hung. When a conversation opens, it scrolls to the end again shortly after, as rows laid out then
+can leave it short of the end, unless the timeline was touched.
+
 On iOS 18 the load starts when the offset comes within 400 points of the top
 (`onScrollGeometryChange`); once a page is laid out and the timeline is still that close (a short
 page), the next one loads. On iOS 17 the row above the oldest turn starts it when it appears. A

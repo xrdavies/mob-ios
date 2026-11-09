@@ -2,20 +2,22 @@ import SwiftUI
 
 private let runnerLabels = ["codex": "Codex", "claude": "Claude Code", "pi": "Pi"]
 
-/// One timeline entry. `last` marks the newest turn footer (it offers Retry).
+/// One timeline row: an entry, or one piece of a long message (`TimelineItem.rows`). `last` marks
+/// the newest turn footer (it offers Retry).
 struct TimelineRow: View {
     @Environment(AppState.self) private var app
     let item: TimelineItem
+    var part = 0
     let runner: String?
     let last: Bool
 
     var body: some View {
         switch item {
         case .user(_, let m, let task):
-            if task?.origin?.isCollab == true { PeerMessage(message: m, task: task) } else { UserMessage(message: m, task: task) }
+            if task?.origin?.isCollab == true { PeerMessage(message: m, task: task, row: part) } else { UserMessage(message: m, task: task) }
         case .assistant(_, let m):
             let task = app.chat.detail?.tasks.first { $0.id == m.taskId }
-            AssistantMessage(message: m, runner: task?.runner ?? runner, model: task?.modelLabel ?? "Model not reported")
+            AssistantMessage(message: m, runner: task?.runner ?? runner, model: task?.modelLabel ?? "Model not reported", part: part)
         case .steps(_, let acts): VStack(alignment: .leading, spacing: 0) { ForEach(acts) { ActivityRow(a: $0) } }.padding(.leading, 34)
         case .group(_, let acts): ActivityGroup(activities: acts).padding(.leading, 34)
         case .ask(_, let q): QuestionCard(q: q).padding(.leading, 34)
@@ -24,6 +26,18 @@ struct TimelineRow: View {
                 .font(.caption).foregroundStyle(.secondary).padding(.leading, 34)
         case .working(_, let t, let latest, let waiting): WorkingRow(task: t, latest: latest, waiting: waiting).padding(.leading, 34)
         case .footer(_, let t): TurnFooter(task: t, last: last).padding(.leading, 34)
+        }
+    }
+}
+
+extension TimelineItem {
+    /// The timeline rows this entry takes: a long reply or message from another agent is one row
+    /// per piece (markdownChunks), so no row is far taller than the lazy stack's estimate.
+    @MainActor var rows: Int {
+        switch self {
+        case .assistant(_, let m): return max(MarkdownChunks.of(m.content).count, 1)
+        case .user(_, let m, let task) where task?.origin?.isCollab == true: return PeerMessage.rows(message: m, task: task)
+        default: return 1
         }
     }
 }
@@ -92,8 +106,22 @@ private struct AssistantMessage: View {
     let message: Message
     let runner: String?
     let model: String
+    /// The piece of the reply this row shows; the first has the header.
+    let part: Int
 
     var body: some View {
+        let chunks = MarkdownChunks.of(message.content)
+        if part > 0 {
+            if part < chunks.count {
+                // Under the previous piece, as far as blocks in one view.
+                MarkdownView(blocks: chunks[part]).padding(.leading, 34).padding(.top, 8)
+            }
+        } else {
+            first(chunks.first ?? [])
+        }
+    }
+
+    private func first(_ blocks: [MdBlock]) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "sparkles")
                 .font(.caption).foregroundStyle(.white)
@@ -110,7 +138,7 @@ private struct AssistantMessage: View {
                     .accessibilityLabel("Copy reply")
                 }
                 Text(model).font(.caption2).foregroundStyle(.secondary)
-                MarkdownView(text: message.content)
+                MarkdownView(blocks: blocks)
             }
         }
     }

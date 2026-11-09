@@ -321,10 +321,12 @@ struct AgentAvatar: View {
 
 /// A turn mobd started to deliver other agents' messages: each on the left with the agent's name,
 /// colour and what it did, without mobd's instructions to the recipient. Only the user is on the right.
+/// Each piece of a long message is its own timeline row (`row`), drawn as one block with the others.
 struct PeerMessage: View {
     @Environment(AppState.self) private var app
     let message: Message
     let task: AgentTask?
+    var row = 0
 
     private struct Part: Hashable {
         let sender: String?
@@ -332,6 +334,17 @@ struct PeerMessage: View {
         let label: String
         let body: String
         let context: String?
+        let notice: Bool
+    }
+
+    /// What was delivered, in order; a notice is one row, other text a row per piece.
+    private static func pieces(_ message: Message, _ task: AgentTask?) -> [(body: String, notice: Bool)] {
+        if let ds = task?.origin?.deliveries, !ds.isEmpty { return ds.map { ($0.text, $0.kind == "notice") } }
+        return Collab.parseDelivery(message.content).map { ($0.body, $0.from == "Mob") }
+    }
+
+    static func rows(message: Message, task: AgentTask?) -> Int {
+        max(pieces(message, task).reduce(0) { $0 + ($1.notice ? 1 : max(MarkdownChunks.of($1.body).count, 1)) }, 1)
     }
 
     private var parts: [Part] {
@@ -343,57 +356,74 @@ struct PeerMessage: View {
                 let s = sessions.first { $0.id == sender }
                 let saved = r.flatMap { r in sender == r.from ? r.fromName : r.toName } ?? "Mob"
                 return Part(sender: sender, name: s.map { Collab.shortLabel($0) } ?? saved, label: Collab.label(d, r), body: d.text,
-                            context: d.kind != "request" ? r?.text : nil)
+                            context: d.kind != "request" ? r?.text : nil, notice: d.kind == "notice")
             }
         }
         return Collab.parseDelivery(message.content).map { p in
             let s = sessions.first { $0.handle.map { "@" + $0 } == p.from }
-            return Part(sender: p.from == "Mob" ? nil : s?.id ?? p.from, name: s.map { Collab.shortLabel($0) } ?? p.from, label: "", body: p.body, context: nil)
+            return Part(sender: p.from == "Mob" ? nil : s?.id ?? p.from, name: s.map { Collab.shortLabel($0) } ?? p.from, label: "", body: p.body,
+                        context: nil, notice: p.from == "Mob")
         }
     }
 
     var body: some View {
         let list = parts
-        VStack(alignment: .leading, spacing: 12) {
+        // This row's piece: the part, its blocks, and which of its pieces it is.
+        var pieces: [(part: Part, blocks: [MdBlock], index: Int, count: Int)] = []
+        for p in list {
+            let chunks = p.notice ? [[]] : MarkdownChunks.of(p.body)
+            for (i, c) in chunks.enumerated() { pieces.append((p, c, i, chunks.count)) }
+        }
+        return Group {
             if list.isEmpty {
-                Text(message.content).font(.footnote).foregroundStyle(.secondary).padding(.leading, 34)
-            }
-            ForEach(list, id: \.self) { p in
-                if let sender = p.sender { line(p, sender) }
-                else {
-                    Label {
-                        Text((p.context.map { "Request “\($0)”: " } ?? "") + p.body)
-                    } icon: { Image(systemName: "info.circle") }
-                    .font(.caption).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
+                if row == 0 { Text(message.content).font(.footnote).foregroundStyle(.secondary).padding(.leading, 34) }
+            } else if row < pieces.count {
+                let piece = pieces[row]
+                if piece.part.notice || piece.part.sender == nil {
+                    notice(piece.part, piece.blocks)
+                } else if let sender = piece.part.sender {
+                    line(piece.part, sender, piece.blocks, index: piece.index, count: piece.count)
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func line(_ p: Part, _ sender: String) -> some View {
+    private func notice(_ p: Part, _ blocks: [MdBlock]) -> some View {
+        Label {
+            if p.notice { Text((p.context.map { "Request “\($0)”: " } ?? "") + p.body) } else { MarkdownView(blocks: blocks) }
+        } icon: { Image(systemName: "info.circle") }
+        .font(.caption).foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    private func line(_ p: Part, _ sender: String, _ blocks: [MdBlock], index: Int, count: Int) -> some View {
         let session = app.chat.sessions.first { $0.id == sender }
         let color = Color(hue: Collab.hue(sender), saturation: 0.6, brightness: 0.75)
+        let first = index == 0, last = index == count - 1
         return HStack(alignment: .top, spacing: 10) {
-            AgentAvatar(id: sender, label: p.name)
+            if first { AgentAvatar(id: sender, label: p.name) } else { Color.clear.frame(width: 24, height: 1) }
             VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    if let session {
-                        Button(p.name) { app.chat.open(session.id) }.font(.caption.weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
-                            .accessibilityHint("Opens that conversation")
-                    } else {
-                        Text(p.name).font(.caption.weight(.semibold)).lineLimit(1)
+                if first {
+                    HStack(spacing: 6) {
+                        if let session {
+                            Button(p.name) { app.chat.open(session.id) }.font(.caption.weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
+                                .accessibilityHint("Opens that conversation")
+                        } else {
+                            Text(p.name).font(.caption.weight(.semibold)).lineLimit(1)
+                        }
+                        if let r = runnerTitle(session?.runner) { Text(r).font(.caption2).foregroundStyle(.secondary) }
+                        if !p.label.isEmpty { Text("· \(p.label)").font(.caption2).foregroundStyle(.secondary) }
                     }
-                    if let r = runnerTitle(session?.runner) { Text(r).font(.caption2).foregroundStyle(.secondary) }
-                    if !p.label.isEmpty { Text("· \(p.label)").font(.caption2).foregroundStyle(.secondary) }
                 }
-                MarkdownView(text: p.body)
-                    .padding(.horizontal, 12).padding(.vertical, 8)
+                // The pieces of one message touch: one background and bar from the first to the last.
+                MarkdownView(blocks: blocks)
+                    .padding(.horizontal, 12).padding(.top, first ? 8 : 0).padding(.bottom, 8)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                    .background(color.opacity(0.08), in: UnevenRoundedRectangle(topLeadingRadius: first ? 8 : 0, bottomLeadingRadius: last ? 8 : 0,
+                                                                                bottomTrailingRadius: last ? 8 : 0, topTrailingRadius: first ? 8 : 0))
                     .overlay(alignment: .leading) { Rectangle().fill(color).frame(width: 2) }
-                if let c = p.context { Text("Re: \(c)").font(.caption2).foregroundStyle(.secondary).lineLimit(1) }
+                if last, let c = p.context { Text("Re: \(c)").font(.caption2).foregroundStyle(.secondary).lineLimit(1) }
             }
         }
     }

@@ -273,6 +273,8 @@ final class AppState: MachineEvents {
             healthError = nil
             desktops.setEnabled(h.sessionDesktops)
             if h.sessionDesktops && first { desktops.refresh() }
+            // A conversation opened before the first answer did not know mobd collaborates.
+            if first { refreshCollab() }
             // The live view waits for health to know whether mobd streams.
             if first, !desktopSizes.isEmpty, stream.state.status == .idle || stream.state.status == .error { connectDesktop() }
         } catch {

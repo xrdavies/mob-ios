@@ -205,13 +205,20 @@ private struct ChatTimeline: View {
         let chat = app.chat
         return ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
-                    if chat.hasOlder || chat.olderError != nil { OlderRow() }
+                // Rows space themselves: 14pt before an entry, the pieces of a long message closer.
+                let older = chat.hasOlder || chat.olderError != nil
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if older { OlderRow() }
                     ForEach(items) { item in
-                        TimelineRow(item: item, runner: app.chat.detail?.session.runner, last: item.id == lastFooter).id(item.id)
+                        // A long message is several rows; the first has the entry's ID.
+                        ForEach(Array(0..<item.rows), id: \.self) { part in
+                            TimelineRow(item: item, part: part, runner: app.chat.detail?.session.runner, last: item.id == lastFooter)
+                                .padding(.top, part > 0 || (!older && item.id == items.first?.id) ? 0 : 14)
+                                .id(part == 0 ? item.id : "\(item.id)#\(part)")
+                        }
                     }
-                    if let o = outgoing { OutgoingMessage(text: o.text).id("outbox") }
-                    Color.clear.frame(height: 1).id("bottom")
+                    if let o = outgoing { OutgoingMessage(text: o.text).padding(.top, 14).id("outbox") }
+                    Color.clear.frame(height: 1).padding(.top, 14).id("bottom")
                         // iOS 17 has no scroll geometry callback: the end is shown while this is.
                         .onAppear { if #unavailable(iOS 18.0) { atBottom = true } }
                         .onDisappear { if #unavailable(iOS 18.0) { atBottom = false } }
@@ -260,11 +267,13 @@ private struct FollowEnd: ViewModifier {
 }
 
 /// iOS 18: also while the content or the visible area changes size (rows laid out, the keyboard
-/// moving), so the end never shows past the last message.
+/// moving), so the end never shows past the last message. Rows laid out after opening can leave it
+/// short of the end, so it goes there again shortly after, unless the reader touched the timeline.
 private struct FollowEndOnResize: ViewModifier {
     let atBottom: Bool
     let wasAtEnd: Bool
     let proxy: ScrollViewProxy
+    @State private var touched = false
 
     func body(content: Content) -> some View {
         if #available(iOS 18.0, *) {
@@ -273,6 +282,14 @@ private struct FollowEndOnResize: ViewModifier {
             } action: { old, new in
                 // Only the visible area or the content changed size; a scroll does not count.
                 if old != new, atBottom || wasAtEnd { proxy.scrollTo("bottom", anchor: .bottom) }
+            }
+            .onScrollPhaseChange { _, phase in if phase == .interacting { touched = true } }
+            .task {
+                for delay in [150, 400, 800] {
+                    try? await Task.sleep(for: .milliseconds(delay))
+                    if Task.isCancelled || touched { return }
+                    proxy.scrollTo("bottom", anchor: .bottom)
+                }
             }
         } else {
             content
