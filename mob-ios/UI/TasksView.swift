@@ -67,7 +67,7 @@ struct TasksView: View {
     private func row(_ task: AgentTask) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .top) {
-                Text(task.prompt ?? "").lineLimit(3)
+                Text(Collab.taskTitle(task)).lineLimit(3)
                 Spacer()
                 StatusBadge(task: task)
             }
