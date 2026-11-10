@@ -31,6 +31,21 @@ final class ChatStateTests: XCTestCase {
         a.finishSending(true)
         XCTAssertTrue(a.text.isEmpty)
         XCTAssertTrue(a.attachments.isEmpty)
+        // The field stays editable while sending (the keyboard stays open): what was typed is kept.
+        a.text = "First"
+        a.beginSending()
+        a.text = "First and more"
+        a.finishSending(true)
+        XCTAssertEqual(a.text, " and more")
+        a.text = "Second"
+        a.beginSending()
+        a.text = "Rewritten"
+        a.finishSending(true)
+        XCTAssertEqual(a.text, "Rewritten")
+        a.beginSending()
+        a.text = "Rewritten  "
+        a.finishSending(true)
+        XCTAssertTrue(a.text.isEmpty)
     }
 
     func testLateSendDoesNotReopenPreviousConversation() async throws {

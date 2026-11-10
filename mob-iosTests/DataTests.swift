@@ -55,6 +55,17 @@ final class DataTests: XCTestCase {
         XCTAssertEqual(items.map(kind), ["user", "group", "assistant", "steps", "footer"])
     }
 
+    /// Steps fold into a group in place: the row keeps its ID when the third step arrives.
+    func testStepsKeepTheirIDWhenTheyFold() {
+        func items(_ n: Int) -> [TimelineItem] {
+            buildTimeline(tasks: [task("t1", Status.running)], messages: [],
+                          activities: (1...n).map { step("\($0)", "2026-10-14T00:00:0\($0)Z") }, questions: [])
+        }
+        let two = items(2).first { kind($0) == "steps" }, three = items(3).first { kind($0) == "group" }
+        XCTAssertNotNil(two)
+        XCTAssertEqual(two?.id, three?.id)
+    }
+
     func testRunningTurnUsesPromptAndWaits() {
         let q = Question(id: "q", taskId: "t1", kind: "approval", text: "Allow?", details: nil, options: nil, allowText: false,
                          status: "pending", answer: nil, approved: nil, createdAt: "2026-10-14T00:00:01Z")
@@ -109,6 +120,13 @@ final class DataTests: XCTestCase {
         let long = markdownChunks([.paragraph(sentences.joined(separator: " "))], size: 200)
         XCTAssertGreaterThan(long.count, 1)
         XCTAssertEqual(long.flatMap { $0 }.map { if case .paragraph(let t) = $0 { t } else { "" } }.joined(separator: " "), sentences.joined(separator: " "))
+        // Chinese text is about twice as wide per character: half as many characters per row.
+        XCTAssertEqual("abc".textWidth, 3)
+        XCTAssertEqual("中文字".textWidth, 6)
+        let chinese = (1...40).map { "这是第\($0)句话。" }
+        let cjk = markdownChunks([.paragraph(chinese.joined())], size: 200)
+        XCTAssertTrue(cjk.flatMap { $0 }.allSatisfy { if case .paragraph(let t) = $0 { t.textWidth <= 200 } else { false } })
+        XCTAssertEqual(cjk.flatMap { $0 }.map { if case .paragraph(let t) = $0 { t } else { "" } }.joined(), chinese.joined())
         let code = (1...45).map { "line \($0)" }
         let pieces = markdownChunks([.code(lang: "sh", text: code.joined(separator: "\n"))]).flatMap { $0 }
         XCTAssertEqual(pieces, [

@@ -84,7 +84,8 @@ func buildTimeline(tasks: [AgentTask], messages: [Message], activities: [Activit
 
         var run: [Activity] = []
         func flush() {
-            if run.count >= groupMin { items.append(.group(id: "\(run[0].id):group", activities: run)) }
+            // One ID either way: the steps fold into a group in place, not as a new row.
+            if run.count >= groupMin { items.append(.group(id: "\(run[0].id):steps", activities: run)) }
             else if !run.isEmpty { items.append(.steps(id: "\(run[0].id):steps", activities: run)) }
             run = []
         }

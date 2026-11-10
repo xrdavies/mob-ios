@@ -112,10 +112,24 @@ func markdownChunks(_ blocks: [MdBlock], size: Int = 500, codeLines: Int = 20) -
 private extension MdBlock {
     var weight: Int {
         switch self {
-        case .heading(_, let t), .paragraph(let t), .quote(let t): return max(t.count, 40)
-        case .listItem(_, _, _, let t): return max(t.count, 40)
+        case .heading(_, let t), .paragraph(let t), .quote(let t): return max(t.textWidth, 40)
+        case .listItem(_, _, _, let t): return max(t.textWidth, 40)
         case .code(_, let t): return 40 * (t.components(separatedBy: "\n").count + 1)
         case .rule: return 20
+        }
+    }
+}
+
+extension StringProtocol {
+    /// Characters as wide as Latin ones: a Chinese, Japanese or Korean character takes about two, so
+    /// a piece of such text is not twice as tall as the timeline expects.
+    var textWidth: Int {
+        unicodeScalars.reduce(0) { n, c in
+            switch c.value {
+            case 0x1100...0x115F, 0x2E80...0xA4CF, 0xAC00...0xD7A3, 0xF900...0xFAFF, 0xFE30...0xFE4F, 0xFF00...0xFF60, 0x20000...0x3FFFD: n + 2
+            case 0x0300...0x036F, 0x200B...0x200F, 0xFE00...0xFE0F: n
+            default: n + 1
+            }
         }
     }
 }
@@ -125,7 +139,7 @@ private func sentences(_ text: String, size: Int) -> [String] {
     var out: [String] = [], current = ""
     text.enumerateSubstrings(in: text.startIndex..., options: .bySentences) { s, _, _, _ in
         guard let s else { return }
-        if !current.isEmpty, current.count + s.count > size {
+        if !current.isEmpty, current.textWidth + s.textWidth > size {
             out.append(current.trimmingCharacters(in: .whitespacesAndNewlines))
             current = ""
         }

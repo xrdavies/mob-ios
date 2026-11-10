@@ -13,11 +13,18 @@ final class ChatDraft {
 
     var attachmentsReady: Bool { attachments.allSatisfy { $0.uploadId != nil && $0.error == nil } }
 
-    func beginSending() { sending = true }
+    /// The text being sent: the field stays editable meanwhile, and what was typed since is kept.
+    private var sent: String?
+
+    func beginSending() { sending = true; sent = text }
 
     func finishSending(_ accepted: Bool) {
         sending = false
-        if accepted { text = ""; attachments = []; picked = [:] }
+        defer { sent = nil }
+        guard accepted else { return }
+        let typed = sent.map { text.hasPrefix($0) ? String(text.dropFirst($0.count)) : text } ?? ""
+        text = typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : typed
+        attachments = []; picked = [:]
     }
 }
 
