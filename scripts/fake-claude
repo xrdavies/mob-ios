@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+# A stand-in for Claude Code to test the app against a real mobd without an agent: set claudeBin to
+# this file. A prompt starting "Turn N" gets an instant reply (HistoryScrollTests), "Tall" a reply
+# taller than the screen and "Other" a short one (KeyboardHistoryTests); any other prompt works for
+# about 45 s with steps and long Chinese and English replies (WorkingTimelineTests).
+import json, sys, time
+args = sys.argv[1:]
+if "--version" in args:
+    print("2.1.296 (Claude Code)"); sys.exit(0)
+if "auth" in args:
+    print(json.dumps({"loggedIn": True, "authMethod": "fake"})); sys.exit(0)
+line = sys.stdin.readline()
+try:
+    prompt = "".join(c.get("text", "") for c in json.loads(line)["message"]["content"] if isinstance(c, dict))
+except Exception:
+    prompt = ""
+def quick(text):
+    print(json.dumps({"type": "system", "subtype": "init", "session_id": "fake-q", "tools": [], "mcp_servers": [], "model": "claude-fake"}), flush=True)
+    print(json.dumps({"type": "assistant", "message": {"id": "m_q", "content": [{"type": "text", "text": text}]}}, ensure_ascii=False), flush=True)
+    print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "session_id": "fake-q", "result": "ok", "usage": {"input_tokens": 1, "output_tokens": 1}}), flush=True)
+    sys.exit(0)
+if prompt.startswith("Turn "):
+    n = prompt[5:].strip()
+    quick(f"Reply {n}.\n\n" + "\n\n".join(f"P17{n}-{k} " + "Words for this paragraph. " * 3 for k in range(1, 4)))
+if prompt.startswith("Tall"):
+    quick("\n\n".join(f"Tall paragraph {k}. " + "This reply is much taller than the screen. " * 10 for k in range(1, 25)))
+if prompt.startswith("Other"):
+    quick("A short reply.")
+def out(o):
+    print(json.dumps(o, ensure_ascii=False), flush=True)
+def step(i):
+    tid = f"tu_{i}"
+    out({"type": "assistant", "message": {"id": f"m_s{i}", "content": [{"type": "tool_use", "id": tid, "name": "Bash", "input": {"command": f"echo step {i}", "description": f"Step {i}"}}]}})
+    time.sleep(0.8)
+    out({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": tid, "content": f"step {i}", "is_error": False}]}})
+    time.sleep(0.8)
+zh = "这是一个用于测试的很长的回复段落，用来模拟代理在工作时输出大量中文内容的情况。" * 6
+en = "This is a long English paragraph that simulates the agent writing a detailed explanation while it works. " * 5
+out({"type": "system", "subtype": "init", "session_id": "fake-s1", "tools": ["Bash"], "mcp_servers": [], "model": "claude-fake"})
+n = 0
+for r in range(4):
+    for _ in range(4):
+        n += 1; step(n)
+    paras = "\n\n".join([f"## 第{r+1}部分", f"{r}.1 " + zh, f"{r}.2 " + en, f"- {r}.3 " + zh, "```\n" + "\n".join(f"line {r}.{k}" for k in range(30)) + "\n```", f"{r}.4 " + zh])
+    out({"type": "assistant", "message": {"id": f"m_t{r}", "content": [{"type": "text", "text": paras}]}})
+    time.sleep(2)
+out({"type": "result", "subtype": "success", "is_error": False, "session_id": "fake-s1", "result": "done", "usage": {"input_tokens": 1, "output_tokens": 1}})
