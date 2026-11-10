@@ -196,6 +196,7 @@ private struct ChatTimeline: View {
     let items: [TimelineItem]
     let lastFooter: String?
     let outgoing: Outgoing?
+    /// iOS 17: the end's row is on screen. iOS 18 follows the end in TimelineScroll.
     @State private var atBottom = true
 
     var body: some View {
@@ -225,32 +226,47 @@ private struct ChatTimeline: View {
                 }
                 .padding(16)
             }
-            .modifier(ChatScrollPosition(atBottom: $atBottom, items: items))
+            .modifier(FollowEnd(items: items, outgoing: outgoing, atBottom: $atBottom, proxy: proxy))
             .accessibilityIdentifier("chatTimeline")
             .scrollDismissesKeyboard(.interactively)
             // A tap on the history hides the keyboard, as in Messages; links and buttons still work.
             .simultaneousGesture(TapGesture().onEnded {
                 UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
             })
-            // The working row keeps its ID as replies grow; follow content only while at the bottom.
-            .onChange(of: items) { if atBottom { proxy.scrollTo("bottom", anchor: .bottom) } }
-            .onChange(of: outgoing) { if outgoing != nil { proxy.scrollTo("bottom", anchor: .bottom) } }
             .onChange(of: pendingQuestion) { if let pendingQuestion { proxy.scrollTo(pendingQuestion, anchor: .bottom) } }
             .modifier(LoadOlderNearTop(chat: chat))
-            .modifier(FollowEnd(atBottom: atBottom, proxy: proxy))
         }
     }
 }
 
-/// Keeps the end of the conversation in view, measured on the real bottom row (mob-ios#8). The lazy
-/// stack only estimates rows it has not laid out, and a message taller than the screen makes that
-/// estimate far off: opened at the bottom of the estimate, or with the keyboard re-estimating it,
-/// the view showed only space past the last message until it was scrolled.
+/// Keeps the end of the conversation in view while it is followed: iOS 18 in TimelineScroll, iOS 17
+/// by the bottom row while that row is on screen.
 private struct FollowEnd: ViewModifier {
+    let items: [TimelineItem]
+    let outgoing: Outgoing?
+    @Binding var atBottom: Bool
+    let proxy: ScrollViewProxy
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.modifier(TimelineScroll(items: items, outgoing: outgoing, proxy: proxy))
+        } else {
+            // shortcut: iOS 17 has no scroll geometry callback; remove this fallback when targeting iOS 18.
+            // Anchored at the bottom, older turns added above keep the text on screen in place.
+            content
+                .defaultScrollAnchor(.bottom)
+                .onChange(of: items) { if atBottom { proxy.scrollTo("bottom", anchor: .bottom) } }
+                .onChange(of: outgoing) { if outgoing != nil { proxy.scrollTo("bottom", anchor: .bottom) } }
+                .modifier(KeyboardFollowsEnd(atBottom: atBottom, proxy: proxy))
+        }
+    }
+}
+
+/// iOS 17: at the end when the keyboard started to move, at the end once it stopped (mob-ios#8).
+/// Only for that move: kept afterwards, it pulled a reader scrolling up back to the end (mob-ios#9).
+private struct KeyboardFollowsEnd: ViewModifier {
     let atBottom: Bool
     let proxy: ScrollViewProxy
-    /// At the end when the keyboard started to move; while it moves, the estimate can say otherwise.
-    /// Only for that move: kept afterwards, it pulled a reader scrolling up back to the end (mob-ios#9).
     @State private var wasAtEnd = false
 
     func body(content: Content) -> some View {
@@ -262,38 +278,6 @@ private struct FollowEnd: ViewModifier {
                 if wasAtEnd { proxy.scrollTo("bottom", anchor: .bottom) }
                 wasAtEnd = false
             }
-            .modifier(FollowEndOnResize(atBottom: atBottom, wasAtEnd: wasAtEnd, proxy: proxy))
-    }
-}
-
-/// iOS 18: also while the content or the visible area changes size (rows laid out, the keyboard
-/// moving), so the end never shows past the last message. Rows laid out after opening can leave it
-/// short of the end, so it goes there again shortly after, unless the reader touched the timeline.
-private struct FollowEndOnResize: ViewModifier {
-    let atBottom: Bool
-    let wasAtEnd: Bool
-    let proxy: ScrollViewProxy
-    @State private var touched = false
-
-    func body(content: Content) -> some View {
-        if #available(iOS 18.0, *) {
-            content.onScrollGeometryChange(for: CGSize.self) {
-                CGSize(width: $0.containerSize.height, height: $0.contentSize.height)
-            } action: { old, new in
-                // Only the visible area or the content changed size; a scroll does not count.
-                if old != new, atBottom || wasAtEnd { proxy.scrollTo("bottom", anchor: .bottom) }
-            }
-            .onScrollPhaseChange { _, phase in if phase == .interacting { touched = true } }
-            .task {
-                for delay in [150, 400, 800] {
-                    try? await Task.sleep(for: .milliseconds(delay))
-                    if Task.isCancelled || touched { return }
-                    proxy.scrollTo("bottom", anchor: .bottom)
-                }
-            }
-        } else {
-            content
-        }
     }
 }
 
@@ -383,38 +367,24 @@ private struct SyncStatusLine: View {
     }
 }
 
-private struct ChatScrollPosition: ViewModifier {
-    @Binding var atBottom: Bool
-    let items: [TimelineItem]
-
-    func body(content: Content) -> some View {
-        if #available(iOS 18.0, *) {
-            content
-                .modifier(KeepReadingPosition(items: items, atBottom: atBottom))
-                .defaultScrollAnchor(.bottom, for: .initialOffset)
-                .defaultScrollAnchor(.top, for: .alignment)
-                .defaultScrollAnchor(atBottom ? .bottom : .top, for: .sizeChanges)
-                .onScrollGeometryChange(for: Bool.self) { geometry in
-                    geometry.contentSize.height + geometry.contentInsets.bottom - geometry.visibleRect.maxY < 60
-                } action: { _, bottom in atBottom = bottom }
-        } else {
-            // shortcut: iOS 17 has no scroll geometry callback; remove this fallback when targeting iOS 18.
-            // Anchored at the bottom, older turns added above keep the text on screen in place.
-            content.defaultScrollAnchor(.bottom)
-        }
-    }
-}
-
-/// Older turns added above the shown ones (mob-ios#6): the content grew above what is on screen,
-/// so the offset grows by as much and the text being read stays where it is, also in the middle of
-/// a long message. It is restored in the layout after the one with the new turns; during a drag the
-/// gesture can still move it by about one step. At the end of the conversation the bottom anchor
-/// keeps the end in view instead.
+/// iOS 18: the timeline's scrolling, in one place. It follows the end of the conversation (new
+/// content, the keyboard or the composer changing the visible area, a message sent) until the reader
+/// scrolls away, and only the reader's scrolling decides that. Decided from the lazy stack's
+/// estimate, a layout could leave the view past the last message and still count as at the end:
+/// every update while the agent worked, and every drag, scrolled it back there, and the history
+/// stayed blank until another conversation was opened. A view left past the end is moved back.
+/// It always goes to the bottom row, which the lazy stack then lays out: the bottom edge of an
+/// estimated height moved the estimate, and following its every change never settled. A change of
+/// the estimate alone keeps the end in place by the bottom anchor. Older turns added above keep the
+/// text being read in place (mob-ios#6).
 @available(iOS 18.0, *)
-private struct KeepReadingPosition: ViewModifier {
+private struct TimelineScroll: ViewModifier {
     let items: [TimelineItem]
-    let atBottom: Bool
+    let outgoing: Outgoing?
+    let proxy: ScrollViewProxy
     @State private var position = ScrollPosition()
+    @State private var following = true
+    @State private var phase: ScrollPhase = .idle
     @State private var seen = Seen()
 
     /// The first turn is read with the geometry, so a size is matched to the items it was laid
@@ -422,6 +392,11 @@ private struct KeepReadingPosition: ViewModifier {
     fileprivate struct Layout: Equatable {
         var offset: CGFloat
         var height: CGFloat
+        /// The visible area and the space the composer and keyboard take from it.
+        var visible: CGFloat
+        var inset: CGFloat
+        /// How far the view is scrolled past the end of the content: 0 at the end, negative above it.
+        var pastEnd: CGFloat
         var first: String?
     }
 
@@ -433,30 +408,79 @@ private struct KeepReadingPosition: ViewModifier {
         var before: Layout?
         /// The first turn changed from `from` to `to` because older turns were added.
         var pending: (from: String, to: String?)?
+        /// The content height the view was last moved back at: once per height, so moving back
+        /// cannot become a loop of its own.
+        var movedBackAt: CGFloat?
     }
 
     func body(content: Content) -> some View {
         content
             .scrollPosition($position)
-            .onScrollGeometryChange(for: Layout.self) {
-                Layout(offset: $0.contentOffset.y, height: $0.contentSize.height, first: items.first?.id)
-            } action: { _, new in
+            .defaultScrollAnchor(.bottom, for: .initialOffset)
+            .defaultScrollAnchor(.top, for: .alignment)
+            .defaultScrollAnchor(following ? .bottom : .top, for: .sizeChanges)
+            .onScrollPhaseChange { _, new in phase = new }
+            .onScrollGeometryChange(for: Layout.self) { g in
+                // Content shorter than the visible area is shown whole: never past its end.
+                let fits = g.contentSize.height + g.contentInsets.top + g.contentInsets.bottom <= g.containerSize.height
+                return Layout(offset: g.contentOffset.y, height: g.contentSize.height, visible: g.containerSize.height,
+                              inset: g.contentInsets.bottom, pastEnd: fits ? 0 : g.visibleRect.maxY - g.contentSize.height - g.contentInsets.bottom,
+                              first: items.first?.id)
+            } action: { old, new in
                 if let last = seen.last, last.first != new.first { seen.before = last }
                 seen.last = new
-                restore()
+                if restore() { return }
+                if reading {
+                    // At the end, not far past it: a blank view past the end is not the end.
+                    following = abs(new.pastEnd) < 60
+                } else if following, old.visible != new.visible || old.inset != new.inset {
+                    toEnd()
+                } else if new.pastEnd > 60, seen.movedBackAt != new.height {
+                    seen.movedBackAt = new.height
+                    Log.add("timeline: \(Int(new.pastEnd))pt past the end of \(Int(new.height))pt; moved back")
+                    toEnd()
+                }
+            }
+            .onChange(of: items) {
+                // New content at the end, while the reader is not moving the timeline.
+                if following, !reading { toEnd() }
             }
             .onChange(of: items.first?.id) { old, new in
-                guard !atBottom, let old, items.contains(where: { $0.id == old }) else { return }
+                guard !following, let old, items.contains(where: { $0.id == old }) else { return }
                 seen.pending = (old, new)
                 restore()
             }
+            .onChange(of: outgoing) {
+                // A message just sent is read at the end.
+                guard outgoing != nil else { return }
+                following = true
+                toEnd()
+            }
+            .task {
+                // Rows laid out after opening can leave it short of the end.
+                for delay in [150, 400, 800] {
+                    try? await Task.sleep(for: .milliseconds(delay))
+                    if Task.isCancelled { return }
+                    if following, !reading { toEnd() }
+                }
+            }
     }
 
-    private func restore() {
+    /// The reader is moving the timeline.
+    private var reading: Bool { phase == .tracking || phase == .interacting || phase == .decelerating }
+
+    private func toEnd() { proxy.scrollTo("bottom", anchor: .bottom) }
+
+    /// Older turns were laid out: the content grew above what is on screen by as much as the offset
+    /// grows, also in the middle of a long message. During a drag the gesture can still move it by
+    /// about one step.
+    @discardableResult
+    private func restore() -> Bool {
         guard let p = seen.pending, let last = seen.last, last.first == p.to,
-              let before = seen.before, before.first == p.from else { return }
+              let before = seen.before, before.first == p.from else { return false }
         seen.pending = nil
         position.scrollTo(y: last.offset + last.height - before.height)
+        return true
     }
 }
 

@@ -83,7 +83,8 @@ struct Composer: View {
                 .focused($focused)
                 .padding(10)
                 .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
-                .disabled(!app.isConnected || draft.sending)
+                // Not disabled while sending: that took the focus and closed the keyboard on every send.
+                .disabled(!app.isConnected)
             HStack(spacing: 6) {
                 PhotosPicker(selection: $picked, maxSelectionCount: maxAttachments - attachments.count, matching: .images) {
                     Image(systemName: "photo.badge.plus")
