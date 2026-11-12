@@ -73,6 +73,11 @@ struct RootView: View {
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(2)
         }
+        .alert("Still paired on the office computer", isPresented: Binding(get: { app.unpairWarning != nil }, set: { if !$0 { app.unpairWarning = nil } })) {
+            Button("OK") { app.unpairWarning = nil }
+        } message: {
+            Text(app.unpairWarning ?? "")
+        }
         .onChange(of: app.showChat) { tab = 0 }
         .onChange(of: tab, initial: true) { app.chatTabVisible = tab == 0 }
     }

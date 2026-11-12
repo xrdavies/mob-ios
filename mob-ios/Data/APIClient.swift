@@ -94,6 +94,25 @@ final class APIClient {
 
     // MARK: - Requests
 
+    /// What mobd did with DELETE /pair.
+    enum UnpairResult: Equatable { case removed, unsupported, failed }
+
+    /// Removes this device's own pairing (mobd's DELETE /pair, feature unpair), so it leaves the
+    /// office computer's device list. Never throws: the app forgets the machine either way.
+    func unpair() async -> UnpairResult {
+        var req = request(url("pair"), method: "DELETE")
+        req.timeoutInterval = 5
+        guard let (_, response) = try? await session.data(for: req), let http = response as? HTTPURLResponse else { return .failed }
+        return APIClient.unpairResult(http.statusCode)
+    }
+
+    /// 401 and 404: the credential no longer works there, so nothing is left to remove. 405: a
+    /// mobd from before DELETE /pair.
+    static func unpairResult(_ status: Int) -> UnpairResult {
+        if (200..<300).contains(status) || status == 401 || status == 404 { return .removed }
+        return status == 405 ? .unsupported : .failed
+    }
+
     private func check(_ data: Data, _ response: URLResponse) throws {
         guard let http = response as? HTTPURLResponse else { return }
         guard (200..<300).contains(http.statusCode) else {

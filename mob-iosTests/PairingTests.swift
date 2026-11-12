@@ -178,3 +178,39 @@ final class PairingTests: XCTestCase {
         XCTAssertEqual(m.mobdUrl, "https://a.ts.net")
     }
 }
+
+
+final class UnpairTests: XCTestCase {
+    func testUnpairSendsDeleteWithTheDevicesCredential() async {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [UnpairStub.self]
+        for (status, want) in [(204, APIClient.UnpairResult.removed), (401, .removed), (404, .removed), (405, .unsupported), (500, .failed)] {
+            UnpairStub.status = status
+            let client = APIClient(baseURL: "https://unpair-tests.invalid", token: "tok", configuration: config)
+            let got = await client.unpair()
+            XCTAssertEqual(got, want, "status \(status)")
+            XCTAssertEqual(UnpairStub.seen, "DELETE /pair Bearer tok")
+        }
+        let offline = APIClient(baseURL: "https://unpair-offline.invalid", token: "tok", configuration: config)
+        let got = await offline.unpair()
+        XCTAssertEqual(got, .failed)
+    }
+}
+
+private final class UnpairStub: URLProtocol {
+    nonisolated(unsafe) static var status = 204
+    nonisolated(unsafe) static var seen = ""
+
+    override class func canInit(with request: URLRequest) -> Bool { request.url?.host?.hasPrefix("unpair-") == true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        guard request.url?.host == "unpair-tests.invalid" else {
+            client?.urlProtocol(self, didFailWithError: URLError(.cannotConnectToHost))
+            return
+        }
+        Self.seen = "\(request.httpMethod ?? "") \(request.url!.path) \(request.value(forHTTPHeaderField: "Authorization") ?? "")"
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: Self.status, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}

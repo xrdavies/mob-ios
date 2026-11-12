@@ -87,7 +87,7 @@ struct SettingsView: View {
             .confirmationDialog("Remove \(deleting?.name ?? "")?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), titleVisibility: .visible) {
                 Button("Remove", role: .destructive) { if let m = deleting { app.delete(m) } }
             } message: {
-                Text("Only removes it from this phone. Chats stay on the office computer.")
+                Text("Removes it from this phone, and this phone from its device list. Chats stay on the office computer.")
             }
             .task(id: phase) { notificationsAllowed = await app.notifier.allowed() }
         }
@@ -236,7 +236,7 @@ private struct MachineEditor: View {
                 Section {
                     Button("Remove machine", role: .destructive) { removing = true }
                 } footer: {
-                    Text("Only removes it from this phone. Chats stay on the office computer.")
+                    Text("Removes it from this phone, and this phone from its device list. Chats stay on the office computer.")
                 }
             }
             .alert("Rename address", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {

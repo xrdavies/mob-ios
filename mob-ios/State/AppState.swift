@@ -198,6 +198,7 @@ final class AppState: MachineEvents {
     func removeAddress(_ machine: String, _ address: String) {
         guard var m = machines.first(where: { $0.id == machine }) else { return }
         guard m.addresses.count > 1 else { return delete(m) }
+        unpair(m, m.addresses.filter { $0.id == address })
         Keychain.delete(m.addresses.first { $0.id == address }?.tokenAccount ?? "")
         m.addresses.removeAll { $0.id == address }
         if m.route == address { m.route = nil }
@@ -232,6 +233,7 @@ final class AppState: MachineEvents {
     }
 
     func delete(_ m: Machine) {
+        unpair(m, m.addresses)
         machines.removeAll { $0.id == m.id }
         saveMachines()
         for a in m.addresses { Keychain.delete(a.tokenAccount) }
@@ -243,6 +245,34 @@ final class AppState: MachineEvents {
             activate()
         }
         syncWatchers()
+    }
+
+    /// Set when an office computer could not remove this phone's pairing; the root view shows it.
+    var unpairWarning: String?
+
+    /// Removes this phone's pairing at each address that still has a credential, so it leaves the
+    /// office computer's device list. The tokens are read now, before the caller deletes them; the
+    /// phone forgets the machine without waiting.
+    private func unpair(_ m: Machine, _ addresses: [MachineAddress]) {
+        let clients = addresses.compactMap { a -> (String, APIClient)? in
+            guard !a.needsPairing, let token = a.token, !token.isEmpty else { return nil }
+            return (a.url, APIClient(baseURL: a.url, token: token))
+        }
+        guard !clients.isEmpty else { return }
+        Task {
+            var kept: [String] = []
+            for (url, client) in clients {
+                switch await client.unpair() {
+                case .removed: Log.add("\(m.name): removed this phone's pairing at \(url)")
+                case .unsupported: Log.error("\(m.name): \(url) cannot remove pairings (mobd too old)"); kept.append(url)
+                case .failed: Log.error("\(m.name): could not reach \(url) to remove this phone's pairing"); kept.append(url)
+                }
+            }
+            if !kept.isEmpty {
+                let hosts = kept.map { URL(string: $0)?.host ?? $0 }.joined(separator: ", ")
+                unpairWarning = "Removed from this phone, but \(hosts) still lists it. Remove it there with mobd clients delete, or from Mob on that computer."
+            }
+        }
     }
 
     func checkHealth() { Task { await checkHealthNow() } }
